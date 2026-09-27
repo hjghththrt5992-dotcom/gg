@@ -16,8 +16,16 @@ on:
         description: '集成 SUSFS 隐藏 root（需要 KernelSU）'
         type: boolean
         default: true
+      opt:
+        description: '社区调优补丁（内存/调度/文件系统/功耗）'
+        type: boolean
+        default: true
       bbr_default:
-        description: '把 BBR 设为默认 TCP 拥塞控制'
+        description: '把 BBR/BBRv3 设为默认 TCP 拥塞控制'
+        type: boolean
+        default: false
+      ntsync:
+        description: 'NTSync（Wine/游戏兼容层）'
         type: boolean
         default: false
       lto:
@@ -25,6 +33,10 @@ on:
         type: choice
         options: [thin, full, none]
         default: thin
+      o3:
+        description: '用 -O3 编译（更激进）'
+        type: boolean
+        default: false
       ksu_ref:
         description: 'KernelSU 分支 / tag / commit'
         default: main
@@ -73,8 +85,11 @@ jobs:
           ANDROID_VER: ${{ inputs.android_ver }}
           KSU: ${{ inputs.ksu }}
           SUSFS: ${{ inputs.susfs }}
+          OPT: ${{ inputs.opt }}
           BBR_DEFAULT: ${{ inputs.bbr_default }}
+          NTSYNC: ${{ inputs.ntsync }}
           LTO: ${{ inputs.lto }}
+          O3: ${{ inputs.o3 }}
           KSU_REF: ${{ inputs.ksu_ref }}
           SUSFS_REF: ${{ inputs.susfs_ref }}
           STOCK_BOOT: ${{ inputs.stock_boot_url != '' && format('{0}/stock-boot.img', runner.temp) || '' }}

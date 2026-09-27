@@ -19,9 +19,16 @@ KSU_REF="${KSU_REF:-main}"                   # KernelSU 分支 / tag / commit
 SUSFS="${SUSFS:-true}"                       # 集成 SUSFS 隐藏 root（需要 KSU=true）
 SUSFS_REF="${SUSFS_REF:-gki-android14-6.1}"  # SUSFS 分支 / commit
 BBR="${BBR:-true}"                           # 编入 BBR 拥塞控制算法
+BBR3="${BBR3:-true}"                          # 回合 BBRv3（比 BBRv1 更新，需要打补丁）
 BBR_DEFAULT="${BBR_DEFAULT:-false}"          # 把 BBR 设为默认拥塞控制
 NET_EXTRAS="${NET_EXTRAS:-true}"             # TTL/HL 修改 + ipset（热点、代理、防火墙类模块会用到）
+QDISC="${QDISC:-true}"                        # 编入 FQ/FQ_CODEL/CAKE/PIE 等队列调度（降低网络延迟）
+OPT="${OPT:-true}"                            # 一组社区调优补丁（内存/调度/文件系统/功耗，见文档）
+O3="${O3:-false}"                             # 用 -O3 而不是 -O2 编译（更激进，体积更大，未必更快）
+NTSYNC="${NTSYNC:-false}"                     # NTSync 同步原语（跑 Wine/游戏兼容层时有用）
+TMPFS_XATTR="${TMPFS_XATTR:-true}"            # tmpfs 的 xattr / POSIX ACL（部分模块和容器需要）
 LTO="${LTO:-thin}"                           # none / thin / full（full 最慢，体积最小）
+PATCHES_REF="${PATCHES_REF:-41ae18b35d20e0c6ac04116785a4a1089528ae94}"  # WildKernels/kernel_patches 固定 commit
 LOCALVERSION_STR="${LOCALVERSION_STR:--android14-11}"  # uname -r 中 6.1.x 之后的后缀
 KERNEL_NAME="${KERNEL_NAME:-OPPadPro-GKI}"   # 刷包文件名前缀
 BUILD_USER="${BUILD_USER:-kleaf}"            # uname -v 中的编译用户，与官方保持一致
@@ -44,6 +51,7 @@ MANIFEST_URL="https://raw.githubusercontent.com/OnePlusOSS/kernel_manifest/onepl
 KERNEL_REPO=https://github.com/OnePlusOSS/android_kernel_common_oneplus_sm8650.git
 SUSFS_REPO=https://gitlab.com/simonpunk/susfs4ksu.git
 AK3_REPO=https://github.com/osm0sis/AnyKernel3.git
+PATCHES_REPO=https://github.com/WildKernels/kernel_patches.git
 
 log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31m[错误] %s\033[0m\n' "$*" >&2; exit 1; }
@@ -179,6 +187,74 @@ if [ "$SUSFS" = true ]; then
   echo "SUSFS 版本: $SUSFS_VERSION"
 fi
 
+# ------------------------------------------------------------------ 5.5 优化 / 功能补丁
+# 补丁来自社区仓库 WildKernels/kernel_patches（固定 commit，保证可复现）。
+# 每个补丁都先 dry-run，打不上就跳过并警告，绝不中断——它们都是可选增强，不影响能否开机。
+PATCHES_DIR=""
+apply_patch() {  # $1=补丁相对路径  返回 0=成功 1=跳过
+  local rel="$1" p="$PATCHES_DIR/$1"
+  [ -f "$p" ] || { echo "  跳过（不存在）: $rel"; return 1; }
+  if (cd "$KDIR" && patch -p1 --forward --fuzz=3 --no-backup-if-mismatch --dry-run < "$p" >/dev/null 2>&1); then
+    (cd "$KDIR" && patch -p1 --forward --fuzz=3 --no-backup-if-mismatch < "$p" >/dev/null)
+    echo "  已打: $rel"; return 0
+  fi
+  echo "  跳过（冲突，可能与官方源码版本不符）: $rel"; return 1
+}
+
+OPT_APPLIED=0 BBR3_OK=false NTSYNC_OK=false
+if [ "$OPT" = true ] || [ "$BBR3" = true ] || [ "$NTSYNC" = true ]; then
+  log "拉取社区补丁 (kernel_patches @ ${PATCHES_REF:0:12})"
+  PATCHES_DIR="$WORK_DIR/kernel_patches"
+  rm -rf "$PATCHES_DIR"
+  git clone -q "$PATCHES_REPO" "$PATCHES_DIR"
+  git -C "$PATCHES_DIR" checkout -q "$PATCHES_REF"
+fi
+
+if [ "$OPT" = true ]; then
+  log "应用社区调优补丁"
+  # 经筛选：都能干净打上、在 arm64 上确实生效、适合日常使用。
+  # 有意剔除：optimized_mem_operations（arm64 上是死代码，被 __HAVE_ARCH_* 屏蔽）、
+  #           *_scaling_min_freq / use_unlikely_wrap_cpufreq（依赖一加私有 cpufreq 代码，打不上）。
+  OPT_PATCHES=(
+    common/reduce_cache_pressure.patch            # vfs_cache_pressure 100→50，多留 dentry/inode 缓存
+    common/file_struct_8bytes_align.patch         # struct file 8 字节对齐
+    common/increase_sk_mem_packets.patch          # socket 缓冲包数 256→1024
+    common/disable_cache_hot_buddy.patch          # 关掉 CACHE_HOT_BUDDY，更契合 DynamIQ 大小核
+    common/adjust_cpu_scan_order.patch            # 调整调度器扫核顺序
+    common/f2fs_reduce_congestion.patch           # f2fs 拥塞等待 20ms→6ms
+    common/reduce_gc_thread_sleep_time.patch      # f2fs GC 紧急休眠 500ms→50ms
+    common/f2fs_enlarge_min_fsync_blocks.patch    # f2fs min_fsync_blocks 8→20
+    common/increase_ext4_default_commit_age.patch # ext4 提交周期 5s→30s
+    common/add_timeout_wakelocks_globally.patch   # 给 wakelock 加 500ms 超时，减少偷电
+    common/minimise_wakeup_time.patch             # 收紧 alarmtimer 唤醒窗口
+    common/avoid_extra_s2idle_wake_attempts.patch # 减少 s2idle 多余唤醒
+    common/reduce_freeze_timeout.patch            # 冻结超时 20s→1s，息屏更快进深睡
+    common/reduce_pci_pme_wakeups.patch           # PME 轮询 1s→4s
+    common/silence_system_logspam.patch           # 过滤 healthd/logd 日志刷屏
+    common/silence_irq_cpu_logspam.patch          # IRQ 亲和失败降为 debug 级
+    common/mem_opt_prefetch.patch                 # arm64 memcpy 预取
+    common/clear_page_16bytes_align.patch         # arm64 clear_page 对齐
+    common/int_sqrt.patch                         # int_sqrt 优化
+  )
+  for p in "${OPT_PATCHES[@]}"; do apply_patch "${p%% *}" && OPT_APPLIED=$((OPT_APPLIED+1)); done
+  # arm64 版 memcmp（WildKernels 对 >=5.16 内核直接套用）
+  apply_patch common/optimise_memcmp.patch && OPT_APPLIED=$((OPT_APPLIED+1))
+  echo "调优补丁已应用 $OPT_APPLIED 个"
+fi
+
+if [ "$BBR3" = true ]; then
+  log "回合 BBRv3"
+  apply_patch common/bbrv3/0001-net-tcp-backport-BBRv3-to-android14-6.1.patch && BBR3_OK=true
+fi
+
+if [ "$NTSYNC" = true ]; then
+  log "应用 NTSync 补丁"
+  if apply_patch common/ntsync/ntsync_compat_android14-6.1.patch &&
+     apply_patch common/ntsync/ntsync_base.patch; then
+    NTSYNC_OK=true
+  fi
+fi
+
 # ------------------------------------------------------------------ 6. 内核配置
 # 自编译的内核签名密钥与官方不同，system_dlkm 里的 GKI 模块会被当作厂商模块加载；
 # 保留受保护符号列表会导致 WiFi 等模块加载失败，必须删除（SUSFS 文档第 11 条）
@@ -210,15 +286,40 @@ if [ "$SUSFS" = true ]; then cfg -e KSU_SUSFS; REQUIRED+=(KSU_SUSFS); fi
 if [ "$BBR" = true ]; then
   cfg -e TCP_CONG_ADVANCED -e TCP_CONG_BBR
   REQUIRED+=(TCP_CONG_BBR)
-  if [ "$BBR_DEFAULT" = true ]; then
-    cfg -e DEFAULT_BBR -d DEFAULT_CUBIC --set-str DEFAULT_TCP_CONG bbr
-    REQUIRED+=(DEFAULT_BBR)
-  fi
+fi
+if [ "$BBR3_OK" = true ]; then
+  cfg -e TCP_CONG_ADVANCED -e TCP_CONG_BBR3
+  REQUIRED+=(TCP_CONG_BBR3)
+fi
+if [ "$BBR_DEFAULT" = true ]; then
+  # 默认算法：装了 BBRv3 就用 bbr3，否则用 bbr（v1）
+  if [ "$BBR3_OK" = true ]; then cfg --set-str DEFAULT_TCP_CONG bbr3
+  elif [ "$BBR" = true ]; then cfg -e DEFAULT_BBR -d DEFAULT_CUBIC --set-str DEFAULT_TCP_CONG bbr; fi
 fi
 if [ "$NET_EXTRAS" = true ]; then
   cfg -e IP_NF_TARGET_TTL -e IP6_NF_TARGET_HL -e IP6_NF_MATCH_HL \
-      -e IP_SET -e IP_SET_HASH_IP -e IP_SET_HASH_NET -e NETFILTER_XT_SET
+      -e IP_SET -e IP_SET_HASH_IP -e IP_SET_HASH_IPPORT \
+      -e IP_SET_HASH_IPPORTIP -e IP_SET_HASH_NET -e IP_SET_HASH_NETPORT \
+      -e IP_SET_HASH_NETIFACE -e IP_SET_BITMAP_PORT -e IP_SET_LIST_SET \
+      -e NETFILTER_XT_SET -e NETFILTER_XT_MATCH_ADDRTYPE \
+      -e IP6_NF_NAT -e IP6_NF_TARGET_MASQUERADE
+  cfg --set-val IP_SET_MAX 65534   # 整数项，不能用 -e
   REQUIRED+=(IP_NF_TARGET_TTL IP6_NF_TARGET_HL IP_SET NETFILTER_XT_SET)
+fi
+if [ "$QDISC" = true ]; then
+  cfg -e NET_SCH_FQ -e NET_SCH_FQ_CODEL -e NET_SCH_CAKE -e NET_SCH_PIE -e NET_SCH_FQ_PIE
+  REQUIRED+=(NET_SCH_CAKE)
+fi
+if [ "$TMPFS_XATTR" = true ]; then
+  cfg -e TMPFS_XATTR -e TMPFS_POSIX_ACL
+  REQUIRED+=(TMPFS_XATTR)
+fi
+if [ "$NTSYNC_OK" = true ]; then
+  cfg -e NTSYNC
+  REQUIRED+=(NTSYNC)
+fi
+if [ "$O3" = true ]; then
+  cfg -d CC_OPTIMIZE_FOR_PERFORMANCE -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
 fi
 make "${MAKE_ARGS[@]}" olddefconfig
 
@@ -281,11 +382,14 @@ cat > "$OUT_DIR/build-info.txt" <<EOF
 源码对应固件 : $(git -C "$KDIR" log -1 --format=%s)
 内核版本     : $KERNEL_RELEASE
 编译器       : $(clang --version | head -n1)
-LTO          : $LTO
+LTO / O3     : $LTO / $O3
 KernelSU     : $([ "$KSU" = true ] && echo "$KSU_REF @ $(git -C "$KP/KernelSU" describe --tags --always)" || echo 未集成)
 SUSFS        : $([ "$SUSFS" = true ] && echo "$SUSFS_VERSION ($SUSFS_REF)" || echo 未集成)
-BBR          : $BBR（默认: $BBR_DEFAULT）
-网络扩展     : $NET_EXTRAS
+BBR          : v1=$BBR v3=$BBR3_OK（默认算法: $BBR_DEFAULT）
+网络扩展     : TTL/ipset=$NET_EXTRAS  队列调度=$QDISC
+调优补丁     : $([ "$OPT" = true ] && echo "已应用 $OPT_APPLIED 个 (kernel_patches @ ${PATCHES_REF:0:12})" || echo 未应用)
+NTSync       : $NTSYNC_OK
+tmpfs xattr  : $TMPFS_XATTR
 EOF
 cat "$OUT_DIR/build-info.txt"
 log "全部完成，产物在 $OUT_DIR"

@@ -41,11 +41,34 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 | --- | --- | --- |
 | KernelSU（官方 tiann/KernelSU） | 开 | 内核级 root，内置，不再需要修补 init_boot |
 | SUSFS | 开 | 隐藏 root 痕迹（挂载、路径、uname、cmdline 等），配合 SUSFS 模块使用 |
-| BBR | 开（非默认算法） | `BBR_DEFAULT=true` 可设为默认，或开机后 `sysctl -w net.ipv4.tcp_congestion_control=bbr` |
-| TTL / HL 修改、ipset | 开 | 热点防检测、透明代理、防火墙类模块需要 |
+| BBR + BBRv3 | 开（非默认算法） | 开机后 `sysctl -w net.ipv4.tcp_congestion_control=bbr3`；`BBR_DEFAULT=true` 可设为默认 |
+| 队列调度 FQ/CAKE/PIE | 开 | 配合 BBR 用，降低网络延迟、缓解 bufferbloat |
+| TTL / HL 修改、ipset（全套哈希类型）| 开 | 热点防检测、透明代理、防火墙类模块需要 |
+| 社区调优补丁（20 个） | 开 | 内存/调度/文件系统/功耗微调，见下表；`OPT=false` 关闭 |
+| NTSync | 关 | Wine/游戏兼容层同步原语；`NTSYNC=true` 开启 |
+| tmpfs xattr / ACL | 开 | 部分模块和容器方案需要 |
 | ThinLTO | 开 | 可选 `none` / `thin` / `full` |
+| O3 优化 | 关 | `O3=true` 用 -O3 编译（更激进，体积更大，未必更快） |
 | 版本号伪装 | 开 | `uname -r` 形如 `6.1.118-android14-11`，编译用户/主机与官方一致（`kleaf@build-host`），不带 git 哈希 |
 | 删除 `abi_gki_protected_exports` | 必做 | 自编内核签名密钥与官方不同，不删的话 WiFi 等模块会加载失败 |
+
+### 社区调优补丁明细（`OPT=true`）
+
+来自 [WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patches)（固定 commit，可复现）。脚本会逐个 dry-run，打不上就跳过并警告，不中断。已剔除对本机无效或依赖一加私有代码的补丁（如 `optimized_mem_operations` 在 arm64 上是死代码，`*scaling_min_freq` 依赖一加 cpufreq）。
+
+| 类别 | 补丁 | 作用 |
+| --- | --- | --- |
+| 内存/CPU | reduce_cache_pressure | `vfs_cache_pressure` 100→50，多留 dentry/inode 缓存 |
+| | disable_cache_hot_buddy / adjust_cpu_scan_order | 调度器更契合大小核 DynamIQ |
+| | mem_opt_prefetch / clear_page_16bytes_align / optimise_memcmp | arm64 汇编级内存操作优化 |
+| | file_struct_8bytes_align / int_sqrt / increase_sk_mem_packets | 结构对齐、数学、socket 缓冲 |
+| 文件系统 | f2fs_reduce_congestion / reduce_gc_thread_sleep_time / f2fs_enlarge_min_fsync_blocks | f2fs 读写与 GC 调优 |
+| | increase_ext4_default_commit_age | ext4 提交周期 5s→30s |
+| 功耗 | add_timeout_wakelocks_globally / minimise_wakeup_time | 减少偷电、收紧唤醒窗口 |
+| | avoid_extra_s2idle_wake_attempts / reduce_freeze_timeout / reduce_pci_pme_wakeups | 息屏更快进深睡 |
+| 杂项 | silence_system_logspam / silence_irq_cpu_logspam | 减少无用日志刷屏 |
+
+这些都是数值微调和局部优化，社区在一加/骁龙设备上长期使用；提升偏“跟手感/续航”这类体感，不是跑分暴涨，介意稳定可 `OPT=false`。
 
 ---
 
@@ -100,9 +123,16 @@ STOCK_BOOT=~/boot.img ./build.sh             # 同时生成可 fastboot 刷入�
 | `KSU_REF` | `main` | KernelSU 分支 / tag / commit |
 | `SUSFS` | `true` | 集成 SUSFS（需要 `KSU=true`） |
 | `SUSFS_REF` | `gki-android14-6.1` | SUSFS 分支 / commit |
-| `BBR` / `BBR_DEFAULT` | `true` / `false` | 编入 BBR / 设为默认 |
-| `NET_EXTRAS` | `true` | TTL/HL 修改、ipset |
+| `BBR` / `BBR3` | `true` / `true` | 编入 BBR / BBRv3 拥塞控制 |
+| `BBR_DEFAULT` | `false` | 把默认 TCP 算法设为 bbr3（无则 bbr） |
+| `NET_EXTRAS` | `true` | TTL/HL 修改、全套 ipset 哈希类型 |
+| `QDISC` | `true` | FQ / FQ_CODEL / CAKE / PIE 队列调度 |
+| `OPT` | `true` | 社区调优补丁（见第 2 节明细） |
+| `NTSYNC` | `false` | NTSync 同步原语（Wine/游戏兼容层） |
+| `TMPFS_XATTR` | `true` | tmpfs 的 xattr / POSIX ACL |
+| `O3` | `false` | 用 -O3 而非 -O2 编译 |
 | `LTO` | `thin` | `none` / `thin` / `full` |
+| `PATCHES_REF` | 固定 commit | WildKernels/kernel_patches 的 commit，可换新 |
 | `LOCALVERSION_STR` | `-android14-11` | `uname -r` 中版本号之后的后缀 |
 | `STOCK_BOOT` | 空 | 官方 boot.img 路径，用于生成可直接刷入的 boot.img |
 | `CLANG_DIR` | 空 | 自备 clang 的 bin 目录，留空则下载一加同款 clang |

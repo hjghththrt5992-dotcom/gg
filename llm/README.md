@@ -49,6 +49,8 @@ python llm/main.py eval --finetuned
 python llm/main.py chat --finetuned        # 5. 使用微调后的模型
 ```
 
+出题的质量决定微调的效果：出题模型越大越好。有显卡或时间充裕时可以用 `gen-qa --size 1.5b`，甚至用 `--model` 指定更大的模型（如 Qwen2.5-7B-Instruct）。出题速度约为每段资料 10～30 秒，资料很多时可以先用 `--limit 300` 只处理一部分；中断后再次运行会接着处理。
+
 想用 llama.cpp 运行微调后的模型：先运行 `python llm/main.py merge`，再按屏幕提示转成 GGUF。
 
 ## 需要什么配置
@@ -64,9 +66,12 @@ python llm/main.py chat --finetuned        # 5. 使用微调后的模型
 
 | 项目 | 0.5B | 1.5B |
 |---|---|---|
-| LoRA 微调速度 | 约 150 token/秒，1000 条样本约 2 小时 | 见下方说明 |
-| LoRA 微调峰值内存 | 约 4GB | 见下方说明 |
-| 问答生成速度（transformers，FP32） | 约 21 token/秒 | 见下方说明 |
+| LoRA 微调速度 | 约 150 token/秒 | 约 44 token/秒 |
+| 微调 1000 条样本（1 轮） | 约 2 小时 | 约 7 小时 |
+| LoRA 微调峰值内存 | 约 4GB | 约 8.5GB |
+| 问答生成速度（transformers，FP32） | 约 21 token/秒 | 约 7 token/秒 |
+
+用 llama.cpp 运行 4bit 量化模型，生成速度通常还能再快 2～4 倍。
 
 你电脑上的实际时间，运行 `python llm/main.py check` 会根据实测算力给出估算。
 

@@ -11,10 +11,11 @@ import time
 from common import physical_cores, pick_device
 from config import save_settings
 
-# LoRA 微调每个 token 的计算量（GFLOP）≈ 非嵌入参数量 × 6（前向 2 + 反向 2 + 梯度检查点重算 2）
-TRAIN_GFLOP_PER_TOKEN = {"0.5b": 2.15, "1.5b": 7.9}
+# LoRA 微调每个 token 的计算量（GFLOP）≈ 非嵌入参数量 × 6（前向 2 + 反向 2 + 梯度检查点重算 2），
+# 再按实测校准：4 核 CPU 测速 470~580 GFLOPS，0.5B 实测 150 token/秒，1.5B 实测 44 token/秒
+TRAIN_GFLOP_PER_TOKEN = {"0.5b": 2.15, "1.5b": 7.0}
 TOKENS_PER_1000_SAMPLES = 1.1e6
-TRAIN_EFFICIENCY = 0.65  # 实测：训练时的有效算力约为下面矩阵乘法测速结果的 65%
+TRAIN_EFFICIENCY = 0.55  # 训练时的有效算力约为下面矩阵乘法测速结果的 55%（略偏保守）
 
 
 def cpu_name() -> str:

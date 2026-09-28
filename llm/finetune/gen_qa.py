@@ -25,6 +25,7 @@ QA_PROMPT = (
     "资料：\n{context}"
 )
 BAD_QUESTION = re.compile(r"资料|文中|上文|本文|这段|该段|原文|以上|下列")
+LEADING_REF = re.compile(r"^(根据|按照|依据)(以上|上述|这段)?(资料|材料|上文|原文|文中)(所述|内容)?[，,：:]?\s*")
 QA_PATTERN = re.compile(r"问[:：]\s*(.+?)\s*\n+\s*答[:：]\s*(.+?)(?=\n\s*问[:：]|\Z)", re.S)
 
 
@@ -40,7 +41,8 @@ def grounding(answer: str, context: str) -> float:
 
 
 def parse_qa(output: str) -> list[tuple[str, str]]:
-    return [(q.strip(), a.strip()) for q, a in QA_PATTERN.findall(output)]
+    # 小模型常写"根据资料，……？"，去掉这种开头，保留问题本身
+    return [(LEADING_REF.sub("", q.strip()), a.strip()) for q, a in QA_PATTERN.findall(output)]
 
 
 def filter_qa(pairs: list[tuple[str, str]], context: str, min_grounding: float) -> list[tuple[str, str]]:

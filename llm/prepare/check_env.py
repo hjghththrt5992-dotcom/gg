@@ -11,9 +11,10 @@ import time
 from common import physical_cores, pick_device
 from config import save_settings
 
-# LoRA 微调每个 token 的计算量（GFLOP，含前向、反向和梯度检查点重算）
-TRAIN_GFLOP_PER_TOKEN = {"0.5b": 2.0, "1.5b": 7.0}
+# LoRA 微调每个 token 的计算量（GFLOP）≈ 非嵌入参数量 × 6（前向 2 + 反向 2 + 梯度检查点重算 2）
+TRAIN_GFLOP_PER_TOKEN = {"0.5b": 2.15, "1.5b": 7.9}
 TOKENS_PER_1000_SAMPLES = 1.1e6
+TRAIN_EFFICIENCY = 0.65  # 实测：训练时的有效算力约为下面矩阵乘法测速结果的 65%
 
 
 def cpu_name() -> str:
@@ -68,18 +69,30 @@ def gpu_info() -> tuple[str, float] | None:
 
 
 def benchmark_gflops(seconds: float = 3.0) -> float:
-    """用矩阵乘法粗测 CPU/GPU 算力。"""
+    """用和模型里形状相近的矩阵乘法测算力。"""
     import torch
 
-    device, _ = pick_device()
-    dtype = torch.float32 if device == "cpu" else torch.float16
-    a = torch.randn(1024, 1024, device=device, dtype=dtype)
-    b = torch.randn(1024, 1024, device=device, dtype=dtype)
-    n, t0 = 0, time.time()
+    device, dtype = pick_device()
+    m, k, n = 1024, 896, 4864  # 1024 个 token × 0.5B 模型前馈层的权重
+    a = torch.randn(m, k, device=device, dtype=dtype)
+    b = torch.randn(k, n, device=device, dtype=dtype)
+
+    def sync():
+        if device == "cuda":
+            torch.cuda.synchronize()
+        elif device == "mps":
+            torch.mps.synchronize()
+
+    for _ in range(3):  # 预热
+        a @ b
+    sync()
+    count, t0 = 0, time.time()
     while time.time() - t0 < seconds:
-        (a @ b).sum().item()
-        n += 1
-    return 2 * 1024 ** 3 * n / (time.time() - t0) / 1e9
+        for _ in range(10):
+            a @ b
+        sync()
+        count += 10
+    return 2 * m * k * n * count / (time.time() - t0) / 1e9
 
 
 def check() -> dict:
@@ -103,21 +116,20 @@ def check() -> dict:
     gflops = benchmark_gflops()
     print(f"  矩阵运算速度约 {gflops:.0f} GFLOPS")
 
+    hours = {s: TOKENS_PER_1000_SAMPLES * g / (gflops * TRAIN_EFFICIENCY) / 3600
+             for s, g in TRAIN_GFLOP_PER_TOKEN.items()}
     has_gpu = bool(gpu) and "未启用" not in gpu[0]
-    if has_gpu and gpu[1] >= 6:
-        size, train_size = "1.5b", "1.5b"
-    elif ram >= 12:
-        size, train_size = "1.5b", "0.5b"
-    else:
-        size, train_size = "0.5b", "0.5b"
+    size = "1.5b" if (has_gpu and gpu[1] >= 4) or ram >= 12 else "0.5b"
+    # 1.5B 微调需要约 12GB 内存（或 8GB 显存），并且一晚上（8 小时内）能训练完才推荐
+    big_enough = (has_gpu and gpu[1] >= 8) or (not has_gpu and ram >= 14)
+    train_size = "1.5b" if big_enough and hours["1.5b"] <= 8 else "0.5b"
 
     print("\n==== 推荐 ====")
     print(f"  问答模型：Qwen2.5-{size.upper()}-Instruct")
     print(f"  微调模型：Qwen2.5-{train_size.upper()}-Instruct")
     print("  预估 LoRA 微调耗时（每 1000 条训练样本，1 轮）：")
-    for s, gflop in TRAIN_GFLOP_PER_TOKEN.items():
-        hours = TOKENS_PER_1000_SAMPLES * gflop / (gflops * 0.5) / 3600
-        print(f"    {s.upper()}：约 {hours:.1f} 小时" + ("  ← 推荐" if s == train_size else ""))
+    for s, h in hours.items():
+        print(f"    {s.upper()}：约 {h:.1f} 小时" + ("  ← 推荐" if s == train_size else ""))
     if ram < 8:
         print("  [!] 内存小于 8GB，建议安装 llama-cpp-python 并使用 GGUF 量化模型（download --gguf）")
     save_settings(size=size, train_size=train_size)

@@ -37,3 +37,14 @@ http://localhost:3000/search?q=example
 ## Notes
 
 This is a toy search engine. No ranking, no persistence, no distributed crawling.
+
+## Knowledge-base QA model (`llm/`)
+
+A low-cost question-answering system that runs and fine-tunes on an ordinary computer (no GPU required):
+a small open-source LLM (Qwen2.5 0.5B/1.5B) answers from a local knowledge base via hybrid retrieval
+(BM25 + vectors), with optional RAFT + LoRA fine-tuning. See [llm/README.md](llm/README.md) (Chinese).
+
+```bash
+pip install -r llm/requirements.txt
+python llm/main.py check && python llm/main.py download && python llm/main.py build && python llm/main.py chat
+```

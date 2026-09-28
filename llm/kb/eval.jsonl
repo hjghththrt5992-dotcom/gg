@@ -1,0 +1,75 @@
+{"question": "大语言模型是怎样一个字一个字生成文章的？", "doc": "01_大语言模型基础.md", "keywords": ["下一个|自回归"]}
+{"question": "0.5B 这个说法里的 B 代表什么意思？", "doc": "01_大语言模型基础.md", "keywords": ["十亿|billion"]}
+{"question": "一个 1.5B 的模型做 4bit 量化后大约占多少内存？", "doc": ["01_大语言模型基础.md", "12_硬件与训练成本.md"], "keywords": ["1GB|1 GB"]}
+{"question": "大模型的训练一般分哪几个阶段？", "doc": "01_大语言模型基础.md", "keywords": ["预训练", "指令微调|SFT", "对齐|RLHF|DPO"]}
+{"question": "Qwen2.5 的 0.5B 和 1.5B 版本采用什么开源许可证？", "doc": "01_大语言模型基础.md", "keywords": ["Apache"]}
+{"question": "为什么给小模型的参考资料不能太长？", "doc": ["01_大语言模型基础.md", "07_检索增强生成.md"], "keywords": ["关键信息|少而精|理解能力"]}
+{"question": "Transformer 是哪一年、由哪家公司的研究人员提出的？", "doc": "02_Transformer架构.md", "keywords": ["2017", "谷歌|Google"]}
+{"question": "注意力计算里为什么要除以根号 d？", "doc": "02_Transformer架构.md", "keywords": ["过大|梯度"]}
+{"question": "分组查询注意力 GQA 有什么好处？", "doc": "02_Transformer架构.md", "keywords": ["KV 缓存|KV缓存|内存"]}
+{"question": "RoPE 位置编码是怎样注入位置信息的？", "doc": "02_Transformer架构.md", "keywords": ["旋转"]}
+{"question": "RMSNorm 和 LayerNorm 有什么区别？", "doc": "02_Transformer架构.md", "keywords": ["均值|均方根"]}
+{"question": "生成文字时 KV 缓存起什么作用？", "doc": "02_Transformer架构.md", "keywords": ["重复计算|加快|速度"]}
+{"question": "SwiGLU 前馈网络包含哪几个线性层？", "doc": "02_Transformer架构.md", "keywords": ["gate_proj", "up_proj", "down_proj"]}
+{"question": "BPE 分词算法是怎么构建词表的？", "doc": "03_分词与词表.md", "keywords": ["合并"]}
+{"question": "Qwen 用什么特殊词元标记每轮对话的开始和结束？", "doc": "03_分词与词表.md", "keywords": ["im_start", "im_end"]}
+{"question": "微调时如果不使用模型原来的对话模板会怎样？", "doc": "03_分词与词表.md", "keywords": ["下降|变差"]}
+{"question": "词表大一些有什么好处和坏处？", "doc": "03_分词与词表.md", "keywords": ["更少|更短|更快", "参数"]}
+{"question": "训练一个模型需要的计算量怎么估算？", "doc": "04_预训练与扩展定律.md", "keywords": ["6", "参数|N"]}
+{"question": "Chinchilla 研究认为训练词元数应该是参数量的多少倍？", "doc": "04_预训练与扩展定律.md", "keywords": ["20"]}
+{"question": "为什么不建议在普通电脑上从零预训练大模型？", "doc": "04_预训练与扩展定律.md", "keywords": ["千年|计算量|算力"]}
+{"question": "用 CPU 训练一个 1000 万参数的模型、训练数据 1 亿词元，大概要多长时间？", "doc": "04_预训练与扩展定律.md", "keywords": ["17"]}
+{"question": "预训练出来的基座模型为什么不能直接当助手用？", "doc": "05_指令微调与对齐.md", "keywords": ["续写"]}
+{"question": "RLHF 包含哪几个步骤？", "doc": "05_指令微调与对齐.md", "keywords": ["奖励模型", "PPO|强化学习"]}
+{"question": "DPO 相比 RLHF 有什么优点？", "doc": "05_指令微调与对齐.md", "keywords": ["奖励模型|强化学习|稳定|简单"]}
+{"question": "想让模型掌握大量事实知识，应该用微调还是知识库检索？", "doc": "05_指令微调与对齐.md", "keywords": ["知识库|检索"]}
+{"question": "LoRA 是哪一年由谁提出的？", "doc": "06_LoRA与参数高效微调.md", "keywords": ["2021", "微软|Microsoft"]}
+{"question": "为什么 LoRA 训练刚开始时模型行为和原模型完全一样？", "doc": "06_LoRA与参数高效微调.md", "keywords": ["零"]}
+{"question": "用 Adam 做全参数微调，每个参数大约需要多少字节内存？", "doc": "06_LoRA与参数高效微调.md", "keywords": ["16"]}
+{"question": "LoRA 的 lora_alpha 一般设为多少？", "doc": "06_LoRA与参数高效微调.md", "keywords": ["2 倍|两倍|2倍|2r|2 × r"]}
+{"question": "QLoRA 在 LoRA 的基础上做了什么改进？", "doc": "06_LoRA与参数高效微调.md", "keywords": ["4bit|4 bit|4 位|4位|NF4"]}
+{"question": "LoRA 微调常用的学习率是多少？", "doc": "06_LoRA与参数高效微调.md", "keywords": ["1e-4|3e-4|2e-4"]}
+{"question": "LoRA 合并进原模型以后推理会变慢吗？", "doc": "06_LoRA与参数高效微调.md", "keywords": ["开销|不会"]}
+{"question": "检索增强生成 RAG 最早是谁在哪一年提出的？", "doc": "07_检索增强生成.md", "keywords": ["Facebook", "2020"]}
+{"question": "中文文档切块时每块多少字比较合适？", "doc": "07_检索增强生成.md", "keywords": ["300", "500"]}
+{"question": "BM25 的参数 b 控制什么？", "doc": "07_检索增强生成.md", "keywords": ["长度"]}
+{"question": "RRF 倒数排名融合是怎么计算分数的？", "doc": "07_检索增强生成.md", "keywords": ["排名"]}
+{"question": "切分文档时相邻块为什么要保留一些重叠？", "doc": "07_检索增强生成.md", "keywords": ["边界"]}
+{"question": "为什么重排模型只用来给少量候选排序？", "doc": "07_检索增强生成.md", "keywords": ["慢"]}
+{"question": "RAFT 的训练样本由哪几部分组成？", "doc": "07_检索增强生成.md", "keywords": ["干扰"]}
+{"question": "bge-small-zh-v1.5 输出的向量是多少维？", "doc": "08_文本向量与语义检索.md", "keywords": ["512"]}
+{"question": "用 BGE 中文模型检索时，问题前面要加什么指令？", "doc": "08_文本向量与语义检索.md", "keywords": ["为这个句子生成表示以用于检索相关文章"]}
+{"question": "更换向量模型之后需要做什么？", "doc": "08_文本向量与语义检索.md", "keywords": ["重新"]}
+{"question": "HNSW 是什么？", "doc": "08_文本向量与语义检索.md", "keywords": ["近似最近邻|图|ANN"]}
+{"question": "向量检索有哪些不足？", "doc": "08_文本向量与语义检索.md", "keywords": ["专有名词|型号|数字|生僻"]}
+{"question": "Q4_K_M 量化后的模型体积大约是 16 位模型的多少？", "doc": "09_模型量化与推理加速.md", "keywords": ["30%"]}
+{"question": "为什么说生成文字的速度主要受内存带宽限制？", "doc": "09_模型量化与推理加速.md", "keywords": ["全部参数|读一遍|读取"]}
+{"question": "llama.cpp 是谁开发的？", "doc": "09_模型量化与推理加速.md", "keywords": ["Gerganov"]}
+{"question": "用 CPU 推理时线程数一般设成多少？", "doc": "09_模型量化与推理加速.md", "keywords": ["物理核心"]}
+{"question": "做知识问答时温度设多少比较合适？", "doc": "10_解码策略.md", "keywords": ["0.3|0～0.3|低"]}
+{"question": "top-p 核采样是怎么选词的？", "doc": "10_解码策略.md", "keywords": ["累计概率"]}
+{"question": "重复惩罚一般设为多少？", "doc": "10_解码策略.md", "keywords": ["1.05|1.2"]}
+{"question": "束搜索适合用在什么任务上？", "doc": "10_解码策略.md", "keywords": ["翻译"]}
+{"question": "大模型为什么会产生幻觉？", "doc": "11_幻觉与评测.md", "keywords": ["预测|通顺|记不住"]}
+{"question": "MRR 指标是怎么计算的？", "doc": "11_幻觉与评测.md", "keywords": ["倒数"]}
+{"question": "评测时为什么不能只看拒答正确率？", "doc": "11_幻觉与评测.md", "keywords": ["不知道|错误拒答|无用"]}
+{"question": "困惑度是什么？", "doc": "11_幻觉与评测.md", "keywords": ["交叉熵|指数|犹豫"]}
+{"question": "Windows 电脑上怎么查看显卡有多少显存？", "doc": "12_硬件与训练成本.md", "keywords": ["任务管理器|dxdiag"]}
+{"question": "在 CPU 上用 32 位精度微调 0.5B 模型大约需要多少内存？", "doc": "12_硬件与训练成本.md", "keywords": ["6GB|6 GB|4～6|4-6"]}
+{"question": "CPU 训练到一半断电了怎么办？", "doc": ["12_硬件与训练成本.md", "13_本项目使用手册.md"], "keywords": ["resume"]}
+{"question": "怎样把自己的文档加进知识库？", "doc": "13_本项目使用手册.md", "keywords": ["docs", "build"]}
+{"question": "在国内下载不了模型怎么办？", "doc": "13_本项目使用手册.md", "keywords": ["hf-mirror|镜像"]}
+{"question": "问答速度太慢有什么解决办法？", "doc": "13_本项目使用手册.md", "keywords": ["0.5b|0.5B|gguf|GGUF|llama-cpp|量化"]}
+{"question": "程序生成的索引、模型等文件保存在哪里？", "doc": "13_本项目使用手册.md", "keywords": ["data"]}
+{"question": "今天北京的天气怎么样？", "doc": null}
+{"question": "红烧肉怎么做才好吃？", "doc": null}
+{"question": "2024 年巴黎奥运会中国队获得了多少枚金牌？", "doc": null}
+{"question": "怎样办理护照？", "doc": null}
+{"question": "猫为什么喜欢晒太阳？", "doc": null}
+{"question": "明天股市会涨吗？", "doc": null}
+{"question": "李白一共写了多少首诗？", "doc": null}
+{"question": "感冒发烧应该吃什么药？", "doc": null}
+{"question": "GPT-4 有多少参数？", "doc": null}
+{"question": "深圳到广州的高铁票多少钱？", "doc": null}
+{"question": "Stable Diffusion 是怎样生成图片的？", "doc": null}
+{"question": "Python 编程语言是谁发明的？", "doc": null}

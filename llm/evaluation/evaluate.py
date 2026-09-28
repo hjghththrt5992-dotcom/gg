@@ -1,7 +1,7 @@
 """评测：用数字衡量"效果好不好"。
 
 评测集每行一个 JSON：
-  可回答：{"question": "...", "doc": "应命中的文档文件名", "keywords": ["必须出现的词", "同义词A|同义词B"]}
+  可回答：{"question": "...", "doc": "应命中的文档文件名（多个时用列表）", "keywords": ["必须出现的词", "同义词A|同义词B"]}
   不可回答（知识库里没有）：{"question": "...", "doc": null}
 指标：
   检索命中率 Hit@1 / Hit@K、MRR —— 正确文档是否被检索到
@@ -27,23 +27,31 @@ def keywords_hit(answer: str, keywords: list[str]) -> bool:
     return all(any(alt.strip().lower() in text for alt in group.split("|")) for group in keywords)
 
 
+def expected_docs(item: dict) -> set[str]:
+    doc = item.get("doc")
+    return set(doc) if isinstance(doc, list) else {doc}
+
+
 def _pct(num: int, den: int) -> str:
     return f"{100 * num / den:.1f}%（{num}/{den}）" if den else "-"
 
 
 def evaluate(retriever, rag=None, eval_path: Path = KB_EVAL, tag: str = "base", limit: int | None = None) -> dict:
-    items = read_jsonl(eval_path)[:limit] if limit else read_jsonl(eval_path)
+    items = read_jsonl(eval_path)
     answerable = [x for x in items if x.get("doc")]
     unanswerable = [x for x in items if not x.get("doc")]
+    if limit:  # 抽查时两类题按比例都保留
+        answerable = answerable[:limit]
+        unanswerable = unanswerable[:max(1, limit // 5)]
+    items = answerable + unanswerable
 
     # ---- 检索 ----
     hit1 = hitk = 0
     mrr = 0.0
     for x in answerable:
         hits = retriever.search(x["question"], top_k=CANDIDATES)
-        ranks = [i for i, h in enumerate(hits) if h["doc"] == x["doc"]]
+        ranks = [i for i, h in enumerate(hits) if h["doc"] in expected_docs(x)]
         rank = ranks[0] if ranks else None
-        x["_rank"] = rank
         hit1 += rank == 0
         hitk += rank is not None and rank < TOP_K
         mrr += 1 / (rank + 1) if rank is not None else 0
@@ -74,7 +82,7 @@ def evaluate(retriever, rag=None, eval_path: Path = KB_EVAL, tag: str = "base", 
             else:
                 ok = grounding(x.get("answer", ""), answer) >= 0.5
             cited_docs = {contexts[n - 1]["doc"] for n in cited_numbers(answer) if 0 < n <= len(contexts)}
-            row.update(correct=ok and not refused, cited_ok=x["doc"] in cited_docs)
+            row.update(correct=ok and not refused, cited_ok=bool(expected_docs(x) & cited_docs))
             correct += row["correct"]
             cite_ok += row["cited_ok"]
             false_refuse += refused

@@ -69,7 +69,9 @@ def train_lora(base_model: Path, data_path: Path = OUTPUT_DIR / "train.jsonl", o
     if resume and (ckpt_dir / "adapter_config.json").exists():
         model = PeftModel.from_pretrained(model, str(ckpt_dir), is_trainable=True)
     else:
-        resume = False
+        if resume:
+            print("[训练] 没有找到断点，从头开始训练")
+            resume = False
         config = LoraConfig(r=rank, lora_alpha=rank * 2, lora_dropout=0.05, target_modules=LORA_TARGETS,
                             task_type="CAUSAL_LM")
         model = get_peft_model(model, config)
@@ -86,7 +88,7 @@ def train_lora(base_model: Path, data_path: Path = OUTPUT_DIR / "train.jsonl", o
     def lr_lambda(step: int) -> float:  # 预热 + 余弦衰减
         if step < warmup:
             return (step + 1) / warmup
-        progress = (step - warmup) / max(1, total_steps - warmup)
+        progress = min(1.0, (step - warmup) / max(1, total_steps - warmup))
         return 0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * progress))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)

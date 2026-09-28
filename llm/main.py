@@ -16,10 +16,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")  # 只显示错误，界面更清爽
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 for stream in (sys.stdout, sys.stderr):  # Windows 终端默认 GBK，统一改成 UTF-8 避免乱码
     try:
         stream.reconfigure(encoding="utf-8")
@@ -135,6 +138,12 @@ def cmd_eval(args):
 
 
 def main():
+    try:
+        from transformers.utils import logging as hf_logging
+
+        hf_logging.disable_progress_bar()
+    except ImportError:
+        pass
     parser = argparse.ArgumentParser(description="低成本知识库问答模型", formatter_class=argparse.RawTextHelpFormatter,
                                      epilog=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)

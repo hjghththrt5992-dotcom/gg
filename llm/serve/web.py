@@ -126,6 +126,8 @@ def make_handler(rag, info: dict):
                 self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
             elif self.path == "/api/info":
                 self._send(200, json.dumps(info, ensure_ascii=False).encode("utf-8"), "application/json")
+            elif self.path == "/favicon.ico":
+                self._send(204, b"", "image/x-icon")
             else:
                 self._send(404, b"not found", "text/plain")
 

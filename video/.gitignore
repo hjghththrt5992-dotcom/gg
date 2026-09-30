@@ -1,0 +1,4 @@
+.cache/
+__pycache__/
+out/*
+!out/claude_intro.mp4

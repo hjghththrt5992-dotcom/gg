@@ -1,0 +1,5 @@
+numpy
+soundfile
+sherpa-onnx
+playwright
+imageio-ffmpeg

@@ -93,7 +93,7 @@ With this on, the kernel can run LXC / Docker / Podman. Containers get their own
 | `SYSVIPC` / `POSIX_MQUEUE` / `IPC_NS` | Inter-process communication and its isolation; databases, systemd and others depend on it |
 | `USER_NS` | User namespaces (restricted so that only root can create them) |
 | `DEVTMPFS` | `/dev` device nodes are created automatically inside containers |
-| `NETFILTER_XT_TARGET_REJECT` / `LOG` / `MATCH_RECENT` | Firewall rules commonly used inside containers |
+| `NETFILTER_XT_TARGET_LOG` / `MATCH_RECENT` | Used by firewalls such as UFW and Fail2ban inside containers (REJECT comes from `IP_NF_TARGET_REJECT`, already on in the official config) |
 
 Networking (veth, bridge, NAT), cgroup v2, overlayfs and seccomp are already in the official kernel. Three community patches are also applied. All three are required; if any of them fails to apply, the build stops:
 
@@ -111,7 +111,23 @@ Networking (veth, bridge, NAT), cgroup v2, overlayfs and seccomp are already in 
 
 These were tested: turning them on together changed the CRC of 2,880 KMI symbols, which would make every vendor module fail to load.
 
-**How to use it:** the kernel only provides the capability; you still need user-space tools, for example the docker and lxc packages in the Termux root repository. After flashing, you can run Docker's `check-config.sh` or `lxc-checkconfig` on the tablet to verify (they read `/proc/config.gz`). Running Docker on Android also requires handling cgroup mounts, networking and so on; follow the documentation of the tool you use.
+This project's container config matches the list [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) gives for GKI kernels, and uses the same SYSVIPC patch.
+
+#### Starting a container
+
+The kernel only provides the capability; you still need a user-space container tool. **Droidspaces** is recommended: a container runtime built for Android with a GUI that handles Android-specific issues such as SELinux and networking, and can run full distributions with systemd.
+
+1. **Flash a kernel with container support** (`CONTAINERS=true`, output name contains `-Container`) and boot.
+2. **Deal with SUSFS** (the default kernel includes it): turn off "HIDE SUS MOUNTS FOR ALL PROCESSES" in the SuSFS4KSU settings, or containers fail to start; or build with `SUSFS=false`. Droidspaces does not officially support running alongside SUSFS.
+3. **Install the app:** download the APK from [Droidspaces Releases](https://github.com/ravindu644/Droidspaces-OSS/releases/latest), install it and grant root. On first launch it installs its backend to `/data/local/Droidspaces/bin` automatically.
+   With APatch or Magisk, also enable "Daemon mode" in the app and reboot; KernelSU doesn't need this.
+4. **Self-check:** Settings (gear) → Requirements → Check Requirements, or run `su -c droidspaces check` in a terminal. Required items should all be green; yellow warnings for optional items are fine.
+5. **Install a distribution:** Containers tab → cloud icon above "+" → pick a distribution (Debian, Ubuntu, Arch, etc.) → Download → Install. In the wizard, the "sparse image" type is recommended for better stability on f2fs.
+6. **Start and enter it:** tap "Start" on the container card, then open the container in the Panel tab and use the built-in terminal; or copy the login command into Termux, which looks like `su -c 'droidspaces --name=<container> enter <user>'`.
+
+Networking defaults to "host mode", sharing the tablet's network, which is the simplest; choose "NAT mode" for isolation and port forwarding. For a graphical desktop and GPU acceleration (Termux:X11 + Turnip), see the Droidspaces "Display, audio and desktop" documentation.
+
+Other tools such as LXC also work; after flashing you can run Docker's `check-config.sh` or `lxc-checkconfig` on the tablet to verify (they read `/proc/config.gz`). However, the Termux root repository no longer has a docker package and its lxc is stuck at the old 3.1, so setting things up yourself on Android is much harder than with Droidspaces.
 
 ### KMI check (`ABI_CHECK=true`, on by default)
 

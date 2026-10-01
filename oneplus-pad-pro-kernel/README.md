@@ -93,7 +93,7 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 | `SYSVIPC` / `POSIX_MQUEUE` / `IPC_NS` | 进程间通信及其隔离，数据库、systemd 等依赖 |
 | `USER_NS` | 用户命名空间（已限制为只有 root 能创建） |
 | `DEVTMPFS` | 容器里自动生成 `/dev` 设备节点 |
-| `NETFILTER_XT_TARGET_REJECT` / `LOG` / `MATCH_RECENT` | 容器内常用的防火墙规则 |
+| `NETFILTER_XT_TARGET_LOG` / `MATCH_RECENT` | 容器内 UFW、Fail2ban 等防火墙常用（REJECT 由官方已开的 `IP_NF_TARGET_REJECT` 提供） |
 
 网络（veth、bridge、NAT）、cgroup v2、overlayfs、seccomp 官方内核本来就有。同时会打三个社区补丁，缺一不可，任何一个打不上就停止编译：
 
@@ -111,7 +111,23 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 
 这几项是实测过的：一起打开后有 2880 个 KMI 符号的 CRC 改变，刷进去厂商模块会全部加载失败。
 
-**怎么用**：内核只提供能力，还需要用户态工具，比如 Termux root 仓库里的 docker、lxc 等包。刷入后可以在平板上运行 Docker 的 `check-config.sh` 或 `lxc-checkconfig` 自查（它们读的是 `/proc/config.gz`）。Android 上跑 Docker 还要处理 cgroup 挂载、网络等问题，请按所用工具的文档操作。
+本项目的容器配置与 [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) 官方给 GKI 内核的清单一致，用的也是同一个 SYSVIPC 补丁。
+
+#### 怎么启动容器
+
+内核只提供能力，还需要一个用户态的容器工具。推荐 **Droidspaces**：专门为 Android 做的容器运行时，有图形界面，处理了 SELinux、网络等 Android 特有的问题，能跑带 systemd 的完整发行版。
+
+1. **刷入带容器支持的内核**（`CONTAINERS=true`，产物名带 `-Container`），开机。
+2. **处理 SUSFS**（默认内核带 SUSFS）：在 SuSFS4KSU 的设置里关闭「HIDE SUS MOUNTS FOR ALL PROCESSES」，否则容器起不来；或者编译时直接 `SUSFS=false`。Droidspaces 官方不支持和 SUSFS 一起用。
+3. **安装 App**：从 [Droidspaces Releases](https://github.com/ravindu644/Droidspaces-OSS/releases/latest) 下载 APK 安装，授予 root。首次打开会自动把后端装到 `/data/local/Droidspaces/bin`。
+   用 APatch 或 Magisk 的话，还要在 App 里开启「守护进程模式」并重启；KernelSU 不需要。
+4. **自检**：设置（齿轮）→ 需求 → 检查需求，或在终端运行 `su -c droidspaces check`。必需项应该全绿，可选项有黄色警告不影响使用。
+5. **装一个发行版**：容器页 → 「+」上方的云图标 → 选发行版（Debian、Ubuntu、Arch 等）→ 下载 → 安装。向导里推荐选「稀疏镜像」类型，在 f2fs 上更稳。
+6. **启动和进入**：在容器卡片上点「启动」，然后到面板页点这个容器，用内置终端进入；或者复制登录命令到 Termux 里运行，形如 `su -c 'droidspaces --name=容器名 enter 用户名'`。
+
+网络默认是「主机模式」，和平板共用网络，最省事；要隔离就选「NAT 模式」，还能配端口转发。图形桌面和 GPU 加速（Termux:X11 + Turnip）见 Droidspaces 的「显示、音频与桌面」文档。
+
+也可以用 LXC 等其他工具，刷入后可在平板上运行 Docker 的 `check-config.sh` 或 `lxc-checkconfig` 自查（它们读 `/proc/config.gz`）。但 Termux 的 root 软件源里目前已经没有 docker 包，lxc 也停在很老的 3.1 版，在 Android 上自己搭比 Droidspaces 麻烦得多。
 
 ### KMI 检查（`ABI_CHECK=true`，默认开）
 

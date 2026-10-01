@@ -308,6 +308,9 @@ if [ "$CONTAINERS" = true ]; then
      apply_patch common/droidspaces/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.patch &&
      apply_patch common/droidspaces/0001-Guard-USER_NS-for-non-root-users.patch; then
     CONTAINERS_OK=true
+    if [ "$SUSFS" = true ]; then
+      echo "  注意：同时带 SUSFS 时，需在 SuSFS4KSU 设置里关闭「HIDE SUS MOUNTS FOR ALL PROCESSES」，否则容器起不来"
+    fi
   else
     die "容器支持补丁打不上（一加源码版本可能已变化），请关闭 CONTAINERS 或更新 PATCHES_REF"
   fi
@@ -374,9 +377,12 @@ if [ "$CONTAINERS_OK" = true ]; then
   # 不开 CGROUP_PIDS / CGROUP_DEVICE / BRIDGE_NETFILTER / IP_VS：实测打开后 2880 个 KMI 符号 CRC 改变
   # （cgroup 子系统数组变大、skb 扩展编号整体后移、struct net 多出字段），厂商模块会全部加载失败。
   # Docker 在 cgroup v2 下用 BPF 管设备（CGROUP_BPF 已有），缺 BRIDGE_NETFILTER 只是告警，桥接网络仍可用。
+  # 防火墙规则（UFW / Fail2ban）：REJECT 在 6.1 里由 IP_NF_TARGET_REJECT / IP6_NF_TARGET_REJECT 提供，官方已开；
+  # Droidspaces 清单里的 NETFILTER_XT_TARGET_REJECT 在 6.1 中不存在，不用设。
   cfg -e SYSVIPC -e POSIX_MQUEUE -e IPC_NS -e PID_NS -e USER_NS -e DEVTMPFS \
-      -e NETFILTER_XT_TARGET_REJECT -e NETFILTER_XT_TARGET_LOG -e NETFILTER_XT_MATCH_RECENT
-  REQUIRED+=(SYSVIPC POSIX_MQUEUE IPC_NS PID_NS USER_NS DEVTMPFS)
+      -e NETFILTER_XT_TARGET_LOG -e NETFILTER_XT_MATCH_RECENT
+  REQUIRED+=(SYSVIPC POSIX_MQUEUE IPC_NS PID_NS USER_NS DEVTMPFS
+             NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT IP_NF_TARGET_REJECT)
 fi
 if [ "$O3" = true ]; then
   cfg -d CC_OPTIMIZE_FOR_PERFORMANCE -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
@@ -459,7 +465,7 @@ BBR          : v1=$BBR v3=$BBR3_OK（默认算法: $BBR_DEFAULT）
 调优补丁     : $([ "$OPT" = true ] && echo "已应用 $OPT_APPLIED 个 (kernel_patches @ ${PATCHES_REF:0:12})" || echo 未应用)
 NTSync       : $NTSYNC_OK
 tmpfs xattr  : $TMPFS_XATTR
-容器支持     : $CONTAINERS_OK
+容器支持     : $CONTAINERS_OK$([ "$CONTAINERS_OK" = true ] && [ "$SUSFS" = true ] && echo "（带 SUSFS：需在 SuSFS4KSU 设置里关闭 HIDE SUS MOUNTS FOR ALL PROCESSES）")
 KMI 检查     : $ABI_RESULT
 EOF
 cat "$OUT_DIR/build-info.txt"

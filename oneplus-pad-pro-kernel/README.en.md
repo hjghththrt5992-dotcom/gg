@@ -30,7 +30,7 @@ Replacing only the GKI kernel **cannot overclock the device or change thermal li
 | Route | Best for | Notes |
 | --- | --- | --- |
 | A. Use a community build | You just want to use it, not build it | [WildKernels/OnePlus_KernelSU_SUSFS](https://github.com/WildKernels/OnePlus_KernelSU_SUSFS) has an `OP-PAD-PRO` config; download the AnyKernel3 zip for your OS version from its Releases |
-| B. Build in the cloud with GitHub Actions | You don't have a Linux machine | Use this repository's workflow. One click on the web; a package is ready in about 30 minutes (the compile itself took 13 minutes on 4 cores) |
+| B. Build in the cloud with GitHub Actions | You don't have a Linux machine | Use this repository's workflow. One click on the web; a package is ready in about 30 minutes (the compile itself took 13 minutes on 4 cores); with the KMI check on, the first run also builds a baseline and takes about an hour |
 | C. Build locally | You want to change the source or add patches | Run `build.sh` in this directory |
 
 B and C use the same script, so everything below applies to both.
@@ -41,7 +41,7 @@ B and C use the same script, so everything below applies to both.
 
 | Feature | Default | Notes |
 | --- | --- | --- |
-| KernelSU (official tiann/KernelSU) | On | Kernel-level root, built in, no need to patch `init_boot` |
+| KernelSU (official tiann/KernelSU) | On | Kernel-level root, built in, no need to patch `init_boot`. With `KSU=false` you get a generic kernel for APatch / Magisk, see below |
 | SUSFS | On | Hides root traces (mounts, paths, uname, cmdline, etc.); use it together with the SUSFS module |
 | BBR + BBRv3 | On (not the default algorithm) | After boot, run `sysctl -w net.ipv4.tcp_congestion_control=bbr3`; set `BBR_DEFAULT=true` to make it the default |
 | FQ / CAKE / PIE queue disciplines | On | Pair with BBR to cut network latency and reduce bufferbloat |
@@ -49,6 +49,8 @@ B and C use the same script, so everything below applies to both.
 | Community tuning patches (20) | On | Memory, scheduler, filesystem and power tweaks, see the table below; disable with `OPT=false` |
 | NTSync | Off | Synchronization primitive for Wine / game compatibility layers; enable with `NTSYNC=true` |
 | tmpfs xattr / ACL | On | Needed by some modules and container setups |
+| Container support | Off | `CONTAINERS=true`: the namespaces and IPC that LXC / Docker / Podman need, see below |
+| KMI check | On | Verifies the kernel interface at build time so WiFi, camera and other vendor modules still load, see below |
 | ThinLTO | On | Options: `none` / `thin` / `full` |
 | O3 optimization | Off | `O3=true` compiles with -O3 (more aggressive, larger, not necessarily faster) |
 | Stock-looking version string | On | `uname -r` looks like `6.1.118-android14-11`, the build user/host match the official build (`kleaf@build-host`), and there is no git hash |
@@ -71,6 +73,55 @@ These come from [WildKernels/kernel_patches](https://github.com/WildKernels/kern
 | Misc | silence_system_logspam / silence_irq_cpu_logspam | Less useless log spam |
 
 These are small value tweaks and local optimizations that the community has used on OnePlus / Snapdragon devices for a long time. Expect better responsiveness and battery life rather than big benchmark gains. If you prefer maximum stability, use `OPT=false`.
+
+### Generic kernel (`KSU=false`): for APatch / Magisk
+
+With KernelSU off, the kernel has no built-in root (SUSFS depends on KernelSU and is turned off automatically); all other optimizations stay. Output file names contain `-Generic`.
+
+- **APatch:** APatch patches the kernel inside `boot.img` directly and needs `KALLSYMS` and `KALLSYMS_ALL`; the script confirms both are on.
+  This project **does not pre-apply APatch at build time.** APatch needs a SuperKey, which is effectively your root password; a public build with a built-in SuperKey would mean everyone knows it. Patch the `boot.img` from this project in the APatch app with your own SuperKey, then flash it (see Section 6.5).
+- **Magisk:** Magisk patches `init_boot`, which is independent of the kernel, so an existing Magisk install keeps working after flashing the generic kernel.
+- **Don't combine with the KernelSU kernel:** two root solutions at once will conflict.
+
+### Container support (`CONTAINERS=true`)
+
+With this on, the kernel can run LXC / Docker / Podman. Containers get their own process tree, IPC and network, can use systemd as PID 1, and run at near-native speed.
+
+| Option enabled | Purpose |
+| --- | --- |
+| `PID_NS` | A separate process tree per container, needed for systemd as PID 1 |
+| `SYSVIPC` / `POSIX_MQUEUE` / `IPC_NS` | Inter-process communication and its isolation; databases, systemd and others depend on it |
+| `USER_NS` | User namespaces (restricted so that only root can create them) |
+| `DEVTMPFS` | `/dev` device nodes are created automatically inside containers |
+| `NETFILTER_XT_TARGET_REJECT` / `LOG` / `MATCH_RECENT` | Firewall rules commonly used inside containers |
+
+Networking (veth, bridge, NAT), cgroup v2, overlayfs and seccomp are already in the official kernel. Three community patches are also applied. All three are required; if any of them fails to apply, the build stops:
+
+- **SYSVIPC interface fix:** SYSVIPC adds fields to the process structure `task_struct`; the patch places them in slots Google reserved for this, so the interface stays unchanged.
+- **oplus_bsp_midas fix:** with PID namespaces enabled, this OnePlus power-statistics module fails to find processes by PID and doesn't check for a null pointer, which crashes the kernel. The patch returns a placeholder process only to this module. It is a workaround and changes no interface.
+- **USER_NS restriction:** only root may create user namespaces, so regular apps can't use them and the attack surface doesn't grow.
+
+**Tested:** with container support on, the KMI check passes and all 15,243 exported symbols keep the same CRC as the official build. Docker's official `check-config.sh` goes from 6 missing "generally necessary" items down to 3, and those 3 are left off on purpose:
+
+| Option left off | Why | Impact on Docker |
+| --- | --- | --- |
+| `CGROUP_DEVICE` (and the optional `CGROUP_PIDS`) | Changes the size of cgroup structures | Under cgroup v2 Docker uses BPF for device control (already supported); you just can't limit a container's process count |
+| `BRIDGE_NETFILTER` | Shifts the numbering of all network packet extensions | Docker shows a warning and traffic between containers bypasses iptables; the default bridge network still works, use `--network host` if you hit problems |
+| `NETFILTER_XT_MATCH_IPVS` | Depends on `IP_VS`, which changes the network namespace structure | Only needed for Swarm cluster mode |
+
+These were tested: turning them on together changed the CRC of 2,880 KMI symbols, which would make every vendor module fail to load.
+
+**How to use it:** the kernel only provides the capability; you still need user-space tools, for example the docker and lxc packages in the Termux root repository. After flashing, you can run Docker's `check-config.sh` or `lxc-checkconfig` on the tablet to verify (they read `/proc/config.gz`). Running Docker on Android also requires handling cgroup mounts, networking and so on; follow the documentation of the tool you use.
+
+### KMI check (`ABI_CHECK=true`, on by default)
+
+Vendor modules (WiFi, camera, touch, etc.) are built against the official kernel and only accept the KMI symbols exported by the official GKI, with their checksums (CRCs). If any change alters the CRC of one of those symbols, modules that use it refuse to load, and WiFi or the camera stops working after flashing.
+
+With this on, the script also builds a baseline from the official source and official config. After building the real kernel, it compares the CRC of every symbol in the KMI lists (`abi_gki_aarch64` plus all additional lists such as `_qcom` and `_oplus`, over 8,000 symbols). Any mismatch is an error and no package is produced. The baseline is cached per source commit, so only the first build takes about twice as long.
+
+Tested: compared with the official baseline, the default configuration (KernelSU + SUSFS + tuning patches + BBRv3 + networking extras) keeps the CRC of all 15,243 exported symbols unchanged and only adds 33 new ones (ipset and similar).
+
+Note: this check catches interface signature changes but cannot prove the kernel behaves correctly; testing on the device is still necessary.
 
 ---
 
@@ -121,7 +172,7 @@ All options:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `ANDROID_VER` | `16` | Tablet's major OS version: 14 / 15 / 16 |
-| `KSU` | `true` | Integrate KernelSU |
+| `KSU` | `true` | Built-in KernelSU; `false` gives a generic kernel for APatch / Magisk |
 | `KSU_REF` | `main` | KernelSU branch / tag / commit |
 | `SUSFS` | `true` | Integrate SUSFS (requires `KSU=true`) |
 | `SUSFS_REF` | `gki-android14-6.1` | SUSFS branch / commit |
@@ -132,6 +183,8 @@ All options:
 | `OPT` | `true` | Community tuning patches (see Section 2) |
 | `NTSYNC` | `false` | NTSync synchronization primitive (Wine / game compatibility layers) |
 | `TMPFS_XATTR` | `true` | tmpfs xattr / POSIX ACL |
+| `CONTAINERS` | `false` | Container support (LXC / Docker / Podman) |
+| `ABI_CHECK` | `true` | Build a baseline and compare KMI symbol CRCs; no package on mismatch |
 | `O3` | `false` | Compile with -O3 instead of -O2 |
 | `LTO` | `thin` | `none` / `thin` / `full` |
 | `PATCHES_REF` | pinned commit | Commit of WildKernels/kernel_patches; can be updated |
@@ -178,6 +231,15 @@ Without root, you can get temporary root with the KernelSU manager's LKM mode, f
 2. To hide root, install the SUSFS module in the manager (`ksu_module_susfs` from the [susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) repository, or the community-maintained susfs4ksu-module).
 3. Run `adb shell uname -a` to confirm the kernel version has changed.
 
+### 6.5 Generic kernel with APatch
+
+1. Build with `KSU=false` and provide the official boot.img matching your current OS version (`STOCK_BOOT` locally, `stock_boot_url` in the cloud) to get `*-Generic-boot.img`.
+2. Copy it to the tablet, patch it in the APatch app, and set your own SuperKey (remember it).
+3. Copy the patched image back to your computer: `fastboot flash boot <patched image>`, reboot, then enter the SuperKey in the APatch app.
+
+APatch lives inside the kernel, so **you must re-patch every time you change kernels.** Updating the kernel with the flashable zip overwrites APatch and you lose root after rebooting, so APatch users should stick to the boot.img route.
+Magisk is unaffected: flash the generic kernel as in 6.2 or 6.3; Magisk lives in `init_boot` and doesn't need re-patching.
+
 ---
 
 ## 7. Recovery and updates
@@ -206,6 +268,9 @@ SUSFS tracks the `main` branch of official KernelSU (see the "Sync with the offi
 
 **The KernelSU manager reports a version mismatch?**
 The manager version must match the KernelSU version in the kernel. `build-info.txt` records the KernelSU version used for the build.
+
+**The build reports "KMI 被破坏" (KMI broken) and produces no package?**
+Some change altered kernel symbols that vendor modules use; flashing it would break WiFi, the camera and so on, so the script refuses to package it. The log lists the changed symbols. Turn off the feature you enabled most recently (or go back to the default `PATCHES_REF`) and rebuild. Bypassing it with `ABI_CHECK=false` is not recommended.
 
 **`CONFIG_xxx 未能启用` (CONFIG_xxx could not be enabled)?**
 The script checks that key options actually took effect. This error means the option's dependencies aren't met in the current source. Follow the message to drop that feature or add the missing dependency.

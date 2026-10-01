@@ -132,17 +132,22 @@ Networking defaults to "host mode", sharing the tablet's network, which is the s
 
 No X11 and no extra apps: run code-server (VS Code in the browser) in the container and open it in the tablet's browser to get a full editor, terminal and extension marketplace, with touch, keyboard and copy/paste all working.
 
-1. Start a container as described above (Debian / Ubuntu is easiest) and keep the default **host mode** networking.
-2. Run the one-step script in the container terminal (as root; the user name is optional and defaults to root):
-   `curl -fsSL https://raw.githubusercontent.com/hjghththrt5992-dotcom/gg/main/oneplus-pad-pro-kernel/container/setup-code-server.sh | bash -s -- <user>`
+1. Start a container as described above (Debian / Ubuntu is easiest), keep the default **host mode** networking, and turn on **"Android storage"** in the container config.
+2. Save [`container/setup-code-server.sh`](container/setup-code-server.sh) to the tablet's Download folder and run it in the container terminal (as root; the user name is optional and defaults to root):
+   `bash /storage/emulated/0/Download/setup-code-server.sh <user>`
+   If GitHub is reachable directly, a single command also works: `curl -fsSL https://raw.githubusercontent.com/hjghththrt5992-dotcom/gg/main/oneplus-pad-pro-kernel/container/setup-code-server.sh | bash -s -- <user>`
 3. The script prints the address and password at the end. Open `http://127.0.0.1:8080` in the tablet's browser and enter the password.
 4. In the Chrome menu choose "Add to Home screen" or "Install app" to open it full screen like a standalone app.
 
-What the script does: installs code-server with its official install script (the official deb / rpm package on Debian / Ubuntu / Fedora, the official standalone build elsewhere); writes a config that **listens only on 127.0.0.1** (other devices on the same Wi-Fi can't connect) with a random password and file permissions 600; enables it with systemd so it starts whenever the container starts. Change the port with an environment variable such as `PORT=8090`; an existing config is never overwritten.
+What the script does:
+- **Download:** tries GitHub first; if it can't connect (for example `Connection reset by peer`, common in mainland China) it switches automatically to the [USTC mirror](https://mirrors.ustc.edu.cn/github-release/coder/code-server/), which mirrors the latest code-server release. If neither works, download the package to the tablet with a browser first and install offline with `CS_PKG_FILE=/storage/emulated/0/Download/<file> bash …`. `CS_SOURCE=ustc` uses the mirror directly.
+- **Install:** the official deb package on Debian / Ubuntu (no dependencies, ships a systemd service), the official standalone tarball elsewhere. It no longer depends on the official install script hosted on GitHub.
+- **Config:** **listens only on 127.0.0.1** (other devices on the same Wi-Fi can't connect), random password, file permissions 600; change the port with something like `PORT=8090`; an existing config is never overwritten.
+- **Start on boot:** enabled with systemd so it runs whenever the container starts.
 
-The full flow was tested on Ubuntu 24.04: installation, config generation, redirect to the login page when not logged in, rejection of a wrong password, access to the editor with the right password, listening only on 127.0.0.1, and refusal of access from another address. Not tested on the device (arm64 container); code-server provides official arm64 packages.
+Tested on Ubuntu 24.04: automatic switch to the mirror when GitHub is unreachable (simulated with a local fake mirror server), direct GitHub download, offline install from the standalone tarball, and the message when both sources fail; plus redirect to the login page when not logged in, rejection of a wrong password, access to the editor with the right password, listening only on 127.0.0.1, and refusal of access from another address. Not tested on the device (arm64 container) or against the real USTC mirror (unreachable from the test environment); code-server provides official arm64 packages.
 
-Note: the script downloads from GitHub, which may need a proxy on some networks. If the container uses NAT mode, 127.0.0.1 is no longer shared with Android; switch back to host mode.
+Note: if the container uses NAT mode, 127.0.0.1 is no longer shared with Android; switch back to host mode.
 
 #### Graphical desktop (X11, optional)
 

@@ -30,6 +30,7 @@ TMPFS_XATTR="${TMPFS_XATTR:-true}"            # tmpfs 的 xattr / POSIX ACL（�
 CONTAINERS="${CONTAINERS:-false}"             # 容器支持（LXC / Docker / Podman）：PID/IPC/USER 命名空间、SYSVIPC 等
 ABI_CHECK="${ABI_CHECK:-true}"                # 额外编一个官方配置的基线，核对 KMI 符号 CRC，不一致就不出包
 LTO="${LTO:-thin}"                           # none / thin / full（full 最慢，体积最小）
+PGO="${PGO:-true}"                            # 用一加源码自带的真机性能数据（pgo-profiles/）指导编译优化
 PATCHES_REF="${PATCHES_REF:-41ae18b35d20e0c6ac04116785a4a1089528ae94}"  # WildKernels/kernel_patches 固定 commit
 LOCALVERSION_STR="${LOCALVERSION_STR:--android14-11}"  # uname -r 中 6.1.x 之后的后缀
 KERNEL_NAME="${KERNEL_NAME:-OPPadPro-GKI}"   # 刷包文件名前缀
@@ -387,6 +388,24 @@ fi
 if [ "$O3" = true ]; then
   cfg -d CC_OPTIMIZE_FOR_PERFORMANCE -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
 fi
+PGO_OK=false
+if [ "$PGO" = true ]; then
+  # 一加在 common 里放了一份真机采集的 PGO 数据（IR 插桩，覆盖 5 万多个函数，热点是时钟、zram、binder、调频等），
+  # 并改了编译规则：开 ARCH_SUPPORTS_PGO_CLANG 后，KCFLAGS_PGO 会加到每个文件（个别目录用 PGO_PROFILE := n 排除），
+  # 跨模块内联上限也从 5 放宽到 60。我们打过补丁的函数会和数据对不上，内核又开着 WERROR，所以关掉这几类警告。
+  PGO_FILE="$KDIR/pgo-profiles/vmlinux_v1.profdata"
+  if [ "$LTO" = full ]; then
+    echo "警告：full LTO + PGO 实测链接时超过 14 GB 内存（15 GB 机器被杀），16 GB 的 GitHub 机器同样跑不下，建议用 thin"
+  fi
+  if [ -f "$PGO_FILE" ]; then
+    cfg -e ARCH_SUPPORTS_PGO_CLANG
+    REQUIRED+=(ARCH_SUPPORTS_PGO_CLANG)
+    MAKE_ARGS+=("KCFLAGS_PGO=-fprofile-use=$PGO_FILE -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled -Wno-backend-plugin")
+    PGO_OK=true
+  else
+    echo "源码里没有 pgo-profiles/vmlinux_v1.profdata，跳过 PGO"
+  fi
+fi
 make "${MAKE_ARGS[@]}" olddefconfig
 
 # olddefconfig 会静默丢弃依赖不满足的选项，这里逐项确认
@@ -458,6 +477,7 @@ cat > "$OUT_DIR/build-info.txt" <<EOF
 内核版本     : $KERNEL_RELEASE
 编译器       : $(clang --version | head -n1)
 LTO / O3     : $LTO / $O3
+PGO          : $([ "$PGO_OK" = true ] && echo "已启用（一加真机数据 pgo-profiles/vmlinux_v1.profdata）" || echo 未启用)
 KernelSU     : $([ "$KSU" = true ] && echo "$KSU_REF @ $(git -C "$KP/KernelSU" describe --tags --always)" || echo "未内置（通用内核，可用 APatch App 自行修补 boot.img，或配合 Magisk）")
 SUSFS        : $([ "$SUSFS" = true ] && echo "$SUSFS_VERSION ($SUSFS_REF)" || echo 未集成)
 BBR          : v1=$BBR v3=$BBR3_OK（默认算法: $BBR_DEFAULT）

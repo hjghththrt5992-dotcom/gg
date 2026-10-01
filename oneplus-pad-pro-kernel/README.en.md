@@ -30,7 +30,7 @@ Replacing only the GKI kernel **cannot overclock the device or change thermal li
 | Route | Best for | Notes |
 | --- | --- | --- |
 | A. Use a community build | You just want to use it, not build it | [WildKernels/OnePlus_KernelSU_SUSFS](https://github.com/WildKernels/OnePlus_KernelSU_SUSFS) has an `OP-PAD-PRO` config; download the AnyKernel3 zip for your OS version from its Releases |
-| B. Build in the cloud with GitHub Actions | You don't have a Linux machine | Use this repository's workflow. One click on the web; a package is ready in about 30 minutes (the compile itself took 13 minutes on 4 cores); with the KMI check on, the first run also builds a baseline and takes about an hour |
+| B. Build in the cloud with GitHub Actions | You don't have a Linux machine | Use this repository's workflow. One click on the web; a package is ready in about 30 minutes (on 4 cores the compile took 13 minutes without PGO and 21 minutes for the first build with PGO); with the KMI check on, the first run also builds a baseline and takes about an hour |
 | C. Build locally | You want to change the source or add patches | Run `build.sh` in this directory |
 
 B and C use the same script, so everything below applies to both.
@@ -51,7 +51,8 @@ B and C use the same script, so everything below applies to both.
 | tmpfs xattr / ACL | On | Needed by some modules and container setups |
 | Container support | Off | `CONTAINERS=true`: the namespaces and IPC that LXC / Docker / Podman need, see below |
 | KMI check | On | Verifies the kernel interface at build time so WiFi, camera and other vendor modules still load, see below |
-| ThinLTO | On | Options: `none` / `thin` / `full` |
+| PGO | On | Optimizes the build with OnePlus's real-device profiling data from the source; hot code is grouped together, making it faster and more power-efficient, see below |
+| ThinLTO | On | Options: `none` / `thin` / `full` (full with PGO needs more than 16 GB of memory) |
 | O3 optimization | Off | `O3=true` compiles with -O3 (more aggressive, larger, not necessarily faster) |
 | Stock-looking version string | On | `uname -r` looks like `6.1.118-android14-11`, the build user/host match the official build (`kleaf@build-host`), and there is no git hash |
 | Remove `abi_gki_protected_exports` | Required | A self-built kernel has a different signing key; without this, WiFi and other modules fail to load |
@@ -125,9 +126,37 @@ The kernel only provides the capability; you still need a user-space container t
 5. **Install a distribution:** Containers tab → cloud icon above "+" → pick a distribution (Debian, Ubuntu, Arch, etc.) → Download → Install. In the wizard, the "sparse image" type is recommended for better stability on f2fs.
 6. **Start and enter it:** tap "Start" on the container card, then open the container in the Panel tab and use the built-in terminal; or copy the login command into Termux, which looks like `su -c 'droidspaces --name=<container> enter <user>'`.
 
-Networking defaults to "host mode", sharing the tablet's network, which is the simplest; choose "NAT mode" for isolation and port forwarding. For a graphical desktop and GPU acceleration (Termux:X11 + Turnip), see the Droidspaces "Display, audio and desktop" documentation.
+Networking defaults to "host mode", sharing the tablet's network, which is the simplest; choose "NAT mode" for isolation and port forwarding.
+
+#### Graphical desktop (Linux GUI)
+
+On the kernel side, **container support is all you need**; no extra options. Checked item by item against the Droidspaces `check` source: namespaces, devtmpfs, loop, ext4, overlayfs, FUSE, TUN, veth, bridge, cgroup v2, and the SysV IPC used by X11 shared memory are all present in the container build. Display goes through the Termux:X11 app, and GPU acceleration goes through the Turnip driver using the tablet's existing Adreno driver.
+
+1. Install **Termux** and **Termux:X11**, then run the Droidspaces setup script once in Termux (installs the display and audio components):
+   `curl -fsSL https://github.com/ravindu644/Droidspaces-OSS/raw/refs/heads/dev/scripts/setup-termux.sh | bash`
+2. Search for **XFCE** in the Droidspaces distribution repository and install the official XFCE build (it starts the desktop automatically).
+3. In the container config, enable "Configure Termux:X11" (and "Configure PulseAudio" for sound), start the container, and open Termux:X11 to see the desktop. This step uses software rendering.
+4. **GPU acceleration** (Adreno 750 is supported by [Mesa for Android Container](https://github.com/lfdevs/mesa-for-android-container)): install its package for your distribution inside the container, extract it to `/` and run `ldconfig`; in the container config enable "GPU Access", **turn off "VirGL"**, and add the environment variables `MESA_LOADER_DRIVER_OVERRIDE=kgsl` and `TU_DEBUG=noconform`. `glxinfo -B` showing Turnip / Adreno 750 means it works.
+5. Rendering on the 3K screen is demanding; if it lags, lower the resolution or use scaling in the Termux:X11 settings.
+
+See the Droidspaces "Display, audio and desktop" documentation for details. Droidspaces' community device list has no Snapdragon 8 Gen 3 device yet, and this project hasn't verified this flow on a real device either.
 
 Other tools such as LXC also work; after flashing you can run Docker's `check-config.sh` or `lxc-checkconfig` on the tablet to verify (they read `/proc/config.gz`). However, the Termux root repository no longer has a docker package and its lxc is stuck at the old 3.1, so setting things up yourself on Android is much harder than with Droidspaces.
+
+### PGO (`PGO=true`, on by default): optimizing with real-device data
+
+OnePlus ships real-device profiling data in the source, `pgo-profiles/vmlinux_v1.profdata` (IR instrumentation, 51,398 functions). The hottest paths are timer reads, zram compression (swap / LZ4), Binder, CPU frequency scaling and SELinux lookups, exactly the tablet's everyday workload. OnePlus also changed the build rules: with `ARCH_SUPPORTS_PGO_CLANG` on, this data applies to every file (a few directories are excluded by OnePlus's rules) and the cross-module inlining limit goes from 5 to 60. The open-source build scripts don't enable it, so it's unknown whether OnePlus's official build uses it.
+
+With it, the compiler groups hot code together and moves cold code away, so the CPU instruction cache hits more often and the same work runs with fewer instructions and cache misses: faster and more power-efficient.
+
+Tested (thin LTO):
+- The compiled bitcode really carries real-device call counts (for example 30 functions in `mm/swapfile.o`), while `mm/kasan`, excluded by OnePlus's rules, has none, as a control
+- After linking, 1,613 hot sections sit within 0.9 MB and 33,000 cold sections (6.7 MB) are moved aside
+- The KMI check passes and there are no stack frame size warnings; peak memory 9.2 GB, first build 21 minutes; `Image` grows by about 0.8 MB (more inlining)
+
+**Why full LTO isn't the default:** OnePlus's own build script labels full LTO as "better performance", but in testing full LTO + PGO exceeded 14 GB of memory during linking and was killed; a 16 GB GitHub machine can't run it either. So the default is thin LTO + PGO. On a machine with enough memory you can try `LTO=full` yourself.
+
+**What else can save power:** CPU frequency policy, the scheduler (Qualcomm WALT, OnePlus scheduling tweaks), thermal limits and the GPU all live in vendor modules that a GKI kernel can't change. What the kernel can do (compiler optimization, the tuning patches above, MGLRU memory reclaim which the official config already enables) is essentially done. For more power savings, use the system's power-saving mode or user-space tuning tools such as Scene or uperf to adjust frequency scaling and core allocation.
 
 ### KMI check (`ABI_CHECK=true`, on by default)
 
@@ -135,7 +164,7 @@ Vendor modules (WiFi, camera, touch, etc.) are built against the official kernel
 
 With this on, the script also builds a baseline from the official source and official config. After building the real kernel, it compares the CRC of every symbol in the KMI lists (`abi_gki_aarch64` plus all additional lists such as `_qcom` and `_oplus`, over 8,000 symbols). Any mismatch is an error and no package is produced. The baseline is cached per source commit, so only the first build takes about twice as long.
 
-Tested: compared with the official baseline, the default configuration (KernelSU + SUSFS + tuning patches + BBRv3 + networking extras) keeps the CRC of all 15,243 exported symbols unchanged and only adds 33 new ones (ipset and similar).
+Tested: compared with the official baseline, the default configuration (KernelSU + SUSFS + tuning patches + BBRv3 + networking extras) keeps the CRC of all 15,243 exported symbols unchanged and only adds 33 new ones (ipset and similar); with PGO added, the KMI check passes as well.
 
 Note: this check catches interface signature changes but cannot prove the kernel behaves correctly; testing on the device is still necessary.
 
@@ -202,7 +231,8 @@ All options:
 | `CONTAINERS` | `false` | Container support (LXC / Docker / Podman) |
 | `ABI_CHECK` | `true` | Build a baseline and compare KMI symbol CRCs; no package on mismatch |
 | `O3` | `false` | Compile with -O3 instead of -O2 |
-| `LTO` | `thin` | `none` / `thin` / `full` |
+| `PGO` | `true` | Optimize the build with OnePlus's real-device profiling data (`pgo-profiles/`) |
+| `LTO` | `thin` | `none` / `thin` / `full` (full with PGO needs more than 16 GB of memory) |
 | `PATCHES_REF` | pinned commit | Commit of WildKernels/kernel_patches; can be updated |
 | `LOCALVERSION_STR` | `-android14-11` | Suffix after the version number in `uname -r` |
 | `STOCK_BOOT` | empty | Path to the official boot.img, used to produce a directly flashable boot.img |

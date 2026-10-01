@@ -30,7 +30,7 @@
 | 路线 | 适合谁 | 说明 |
 | --- | --- | --- |
 | A. 用社区成品 | 只想用，不想折腾编译 | [WildKernels/OnePlus_KernelSU_SUSFS](https://github.com/WildKernels/OnePlus_KernelSU_SUSFS) 有 `OP-PAD-PRO` 配置，Release 里下载对应系统版本的 AnyKernel3 包 |
-| B. GitHub Actions 云编译 | 没有 Linux 电脑 | 用本仓库的工作流，网页上点一下，约半小时出包（4 核环境实测编译 13 分钟）；开着 KMI 检查时第一次要多编一个基线，约一小时 |
+| B. GitHub Actions 云编译 | 没有 Linux 电脑 | 用本仓库的工作流，网页上点一下，约半小时出包（4 核环境实测：不带 PGO 13 分钟，带 PGO 首次 21 分钟）；开着 KMI 检查时第一次要多编一个基线，约一小时 |
 | C. 本地编译 | 想改源码、加补丁 | 运行本目录的 `build.sh` |
 
 B 和 C 用的是同一个脚本，下面的内容对两者都适用。
@@ -51,7 +51,8 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 | tmpfs xattr / ACL | 开 | 部分模块和容器方案需要 |
 | 容器支持 | 关 | `CONTAINERS=true`：LXC / Docker / Podman 需要的命名空间和 IPC，见下文 |
 | KMI 检查 | 开 | 编译时核对内核接口，保证 WiFi、相机等厂商模块能正常加载，见下文 |
-| ThinLTO | 开 | 可选 `none` / `thin` / `full` |
+| PGO | 开 | 用一加源码自带的真机性能数据优化编译，热点代码更集中，又快又省电，见下文 |
+| ThinLTO | 开 | 可选 `none` / `thin` / `full`（full 配 PGO 需要 16 GB 以上内存） |
 | O3 优化 | 关 | `O3=true` 用 -O3 编译（更激进，体积更大，未必更快） |
 | 版本号伪装 | 开 | `uname -r` 形如 `6.1.118-android14-11`，编译用户/主机与官方一致（`kleaf@build-host`），不带 git 哈希 |
 | 删除 `abi_gki_protected_exports` | 必做 | 自编内核签名密钥与官方不同，不删的话 WiFi 等模块会加载失败 |
@@ -125,9 +126,37 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 5. **装一个发行版**：容器页 → 「+」上方的云图标 → 选发行版（Debian、Ubuntu、Arch 等）→ 下载 → 安装。向导里推荐选「稀疏镜像」类型，在 f2fs 上更稳。
 6. **启动和进入**：在容器卡片上点「启动」，然后到面板页点这个容器，用内置终端进入；或者复制登录命令到 Termux 里运行，形如 `su -c 'droidspaces --name=容器名 enter 用户名'`。
 
-网络默认是「主机模式」，和平板共用网络，最省事；要隔离就选「NAT 模式」，还能配端口转发。图形桌面和 GPU 加速（Termux:X11 + Turnip）见 Droidspaces 的「显示、音频与桌面」文档。
+网络默认是「主机模式」，和平板共用网络，最省事；要隔离就选「NAT 模式」，还能配端口转发。
+
+#### 图形桌面（Linux 界面）
+
+内核这边**打开容器支持就够了**，不需要额外选项。已对照 Droidspaces 的 `check` 源码逐项核对：命名空间、devtmpfs、loop、ext4、overlayfs、FUSE、TUN、veth、网桥、cgroup v2，以及 X11 共享内存要用的 SysV IPC，容器构建全部满足。显示走 Termux:X11 App，GPU 加速走 Turnip 驱动，直接用平板现有的 Adreno 驱动。
+
+1. 安装 **Termux** 和 **Termux:X11**，在 Termux 里运行一次 Droidspaces 的安装脚本（装显示和声音组件）：
+   `curl -fsSL https://github.com/ravindu644/Droidspaces-OSS/raw/refs/heads/dev/scripts/setup-termux.sh | bash`
+2. 在 Droidspaces 的发行版仓库里搜 **XFCE**，装官方 XFCE 版（自带桌面自动启动）。
+3. 容器配置里打开「配置 Termux:X11」（要声音再开「配置 PulseAudio」），启动容器，打开 Termux:X11 就能看到桌面。这一步是软件渲染。
+4. **GPU 加速**（Adreno 750 已被 [Mesa for Android Container](https://github.com/lfdevs/mesa-for-android-container) 支持）：在容器里装它对应发行版的包，解压到 `/` 后运行 `ldconfig`；容器配置打开「GPU Access」，**关闭「VirGL」**，加环境变量 `MESA_LOADER_DRIVER_OVERRIDE=kgsl` 和 `TU_DEBUG=noconform`。用 `glxinfo -B` 看到 Turnip / Adreno 750 即生效。
+5. 3K 屏渲染压力大，卡的话在 Termux:X11 设置里降低分辨率或改用缩放。
+
+详见 Droidspaces 的「显示、音频与桌面」文档。目前 Droidspaces 的社区设备列表里还没有骁龙 8 Gen 3 机型，本项目也未在真机上验证过这套流程。
 
 也可以用 LXC 等其他工具，刷入后可在平板上运行 Docker 的 `check-config.sh` 或 `lxc-checkconfig` 自查（它们读 `/proc/config.gz`）。但 Termux 的 root 软件源里目前已经没有 docker 包，lxc 也停在很老的 3.1 版，在 Android 上自己搭比 Droidspaces 麻烦得多。
+
+### PGO（`PGO=true`，默认开）：用真机数据优化编译
+
+一加在源码里放了一份真机采集的性能数据 `pgo-profiles/vmlinux_v1.profdata`（IR 插桩，覆盖 51398 个函数），最热的是时钟读取、zram 压缩（swap / LZ4）、Binder、CPU 调频和 SELinux 查询，正是平板的日常负载。一加还改了编译规则：开启 `ARCH_SUPPORTS_PGO_CLANG` 后，这份数据会作用到每个文件（个别目录按一加的规则排除），跨模块内联上限也从 5 放宽到 60。开源的构建脚本里没有启用它，无法确认一加官方是否用了。
+
+编译器据此把热点代码集中摆放、冷门代码挪开，CPU 指令缓存更容易命中，同样的工作执行的指令和缓存缺失更少，既快又省电。
+
+实测（thin LTO）：
+- 编译后的位码里确实带着真机调用次数（如 `mm/swapfile.o` 有 30 个函数带计数），一加规则排除的 `mm/kasan` 没有，作为对照
+- 链接后热点代码 1613 段集中在 0.9 MB 内，冷代码 3.3 万段（6.7 MB）被移开
+- KMI 检查通过，没有栈帧超限警告；峰值内存 9.2 GB，首次编译 21 分钟；`Image` 大约 0.8 MB（更多内联）
+
+**为什么不默认 full LTO**：一加自己的构建脚本标注 full LTO「性能更好」，但实测 full LTO + PGO 在链接时超过 14 GB 内存被系统杀掉，16 GB 的 GitHub 机器同样跑不下来，所以默认 thin LTO + PGO。内存足够的机器可以自己试 `LTO=full`。
+
+**省电还能做什么**：CPU 调频策略、调度器（高通 WALT、一加调度优化）、温控、GPU 都在厂商模块里，GKI 内核改不到。内核这边能做的（编译优化、上面的调优补丁、官方已开启的 MGLRU 内存回收）基本都已做了；要进一步省电，用系统自带的省电模式，或 Scene、uperf 这类用户态调度工具调整调频和核心分配。
 
 ### KMI 检查（`ABI_CHECK=true`，默认开）
 
@@ -135,7 +164,7 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 
 开启后脚本会多编一个「官方源码 + 官方配置」的基线，编完正式内核后，把 KMI 清单（`abi_gki_aarch64` 加上 `_qcom`、`_oplus` 等全部附加清单，共 8000 多个符号）逐个比对 CRC，不一致就报错、不出包。基线按源码 commit 缓存，只有第一次编译会多花一倍时间。
 
-已实测：默认配置（KernelSU + SUSFS + 调优补丁 + BBRv3 + 网络扩展）与官方基线相比，全部 15243 个导出符号的 CRC 都没变，只新增了 ipset 等 33 个符号。
+已实测：默认配置（KernelSU + SUSFS + 调优补丁 + BBRv3 + 网络扩展）与官方基线相比，全部 15243 个导出符号的 CRC 都没变，只新增了 ipset 等 33 个符号；加上 PGO 后 KMI 检查同样通过。
 
 注意：这项检查能发现接口签名的变化，但不能保证内核行为完全正确，真机测试仍然必要。
 
@@ -202,7 +231,8 @@ STOCK_BOOT=~/boot.img ./build.sh             # 同时生成可 fastboot 刷入�
 | `CONTAINERS` | `false` | 容器支持（LXC / Docker / Podman） |
 | `ABI_CHECK` | `true` | 编基线核对 KMI 符号 CRC，不一致就不出包 |
 | `O3` | `false` | 用 -O3 而非 -O2 编译 |
-| `LTO` | `thin` | `none` / `thin` / `full` |
+| `PGO` | `true` | 用一加真机性能数据（`pgo-profiles/`）优化编译 |
+| `LTO` | `thin` | `none` / `thin` / `full`（full 配 PGO 需要 16 GB 以上内存） |
 | `PATCHES_REF` | 固定 commit | WildKernels/kernel_patches 的 commit，可换新 |
 | `LOCALVERSION_STR` | `-android14-11` | `uname -r` 中版本号之后的后缀 |
 | `STOCK_BOOT` | 空 | 官方 boot.img 路径，用于生成可直接刷入的 boot.img |

@@ -36,8 +36,12 @@ on:
         description: 'KMI 检查（多编一个官方基线核对接口，耗时约翻倍，建议保持开启）'
         type: boolean
         default: true
+      pgo:
+        description: 'PGO（用一加源码自带的真机性能数据优化编译）'
+        type: boolean
+        default: true
       lto:
-        description: 'LTO 模式'
+        description: 'LTO 模式（full 加 PGO 链接时需要 16 GB 以上内存，GitHub 机器会爆内存，不建议）'
         type: choice
         options: [thin, full, none]
         default: thin
@@ -107,6 +111,7 @@ jobs:
           CONTAINERS: ${{ inputs.containers }}
           ABI_CHECK: ${{ inputs.abi_check }}
           LTO: ${{ inputs.lto }}
+          PGO: ${{ inputs.pgo }}
           O3: ${{ inputs.o3 }}
           KSU_REF: ${{ inputs.ksu_ref }}
           SUSFS_REF: ${{ inputs.susfs_ref }}

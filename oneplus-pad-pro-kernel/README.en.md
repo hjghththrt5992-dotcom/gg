@@ -49,7 +49,7 @@ B and C use the same script, so everything below applies to both.
 | Community tuning patches (20) | On | Memory, scheduler, filesystem and power tweaks, see the table below; disable with `OPT=false` |
 | NTSync | Off | Synchronization primitive for Wine / game compatibility layers; enable with `NTSYNC=true` |
 | tmpfs xattr / ACL | On | Needed by some modules and container setups |
-| Container support | Off | `CONTAINERS=true`: the namespaces and IPC that LXC / Docker / Podman need, see below |
+| Container / Linux desktop support | On | Run full Linux distributions and a graphical desktop with Droidspaces and similar tools, see below; turn off with `CONTAINERS=false` |
 | KMI check | On | Verifies the kernel interface at build time so WiFi, camera and other vendor modules still load, see below |
 | PGO | On | Optimizes the build with OnePlus's real-device profiling data from the source; hot code is grouped together, making it faster and more power-efficient, see below |
 | ThinLTO | On | Options: `none` / `thin` / `full` (full with PGO needs more than 16 GB of memory) |
@@ -84,7 +84,7 @@ With KernelSU off, the kernel has no built-in root (SUSFS depends on KernelSU an
 - **Magisk:** Magisk patches `init_boot`, which is independent of the kernel, so an existing Magisk install keeps working after flashing the generic kernel.
 - **Don't combine with the KernelSU kernel:** two root solutions at once will conflict.
 
-### Container support (`CONTAINERS=true`)
+### Container / Linux desktop support (`CONTAINERS=true`, on by default)
 
 With this on, the kernel can run LXC / Docker / Podman. Containers get their own process tree, IPC and network, can use systemd as PID 1, and run at near-native speed.
 
@@ -118,7 +118,7 @@ This project's container config matches the list [Droidspaces](https://github.co
 
 The kernel only provides the capability; you still need a user-space container tool. **Droidspaces** is recommended: a container runtime built for Android with a GUI that handles Android-specific issues such as SELinux and networking, and can run full distributions with systemd.
 
-1. **Flash a kernel with container support** (`CONTAINERS=true`, output name contains `-Container`) and boot.
+1. **Flash this project's kernel** (container support is on by default; the output name contains `-Container`) and boot.
 2. **Deal with SUSFS** (the default kernel includes it): turn off "HIDE SUS MOUNTS FOR ALL PROCESSES" in the SuSFS4KSU settings, or containers fail to start; or build with `SUSFS=false`. Droidspaces does not officially support running alongside SUSFS.
 3. **Install the app:** download the APK from [Droidspaces Releases](https://github.com/ravindu644/Droidspaces-OSS/releases/latest), install it and grant root. On first launch it installs its backend to `/data/local/Droidspaces/bin` automatically.
    With APatch or Magisk, also enable "Daemon mode" in the app and reboot; KernelSU doesn't need this.
@@ -228,7 +228,7 @@ All options:
 | `OPT` | `true` | Community tuning patches (see Section 2) |
 | `NTSYNC` | `false` | NTSync synchronization primitive (Wine / game compatibility layers) |
 | `TMPFS_XATTR` | `true` | tmpfs xattr / POSIX ACL |
-| `CONTAINERS` | `false` | Container support (LXC / Docker / Podman) |
+| `CONTAINERS` | `true` | Container / Linux desktop support (Droidspaces, LXC, Docker) |
 | `ABI_CHECK` | `true` | Build a baseline and compare KMI symbol CRCs; no package on mismatch |
 | `O3` | `false` | Compile with -O3 instead of -O2 |
 | `PGO` | `true` | Optimize the build with OnePlus's real-device profiling data (`pgo-profiles/`) |

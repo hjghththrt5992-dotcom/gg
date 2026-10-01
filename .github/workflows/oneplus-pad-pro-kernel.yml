@@ -29,9 +29,9 @@ on:
         type: boolean
         default: false
       containers:
-        description: '容器支持（LXC / Docker / Podman）'
+        description: '容器 / Linux 桌面支持（Droidspaces、LXC、Docker）'
         type: boolean
-        default: false
+        default: true
       abi_check:
         description: 'KMI 检查（多编一个官方基线核对接口，耗时约翻倍，建议保持开启）'
         type: boolean

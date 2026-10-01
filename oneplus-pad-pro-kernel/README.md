@@ -49,7 +49,7 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 | 社区调优补丁（20 个） | 开 | 内存/调度/文件系统/功耗微调，见下表；`OPT=false` 关闭 |
 | NTSync | 关 | Wine/游戏兼容层同步原语；`NTSYNC=true` 开启 |
 | tmpfs xattr / ACL | 开 | 部分模块和容器方案需要 |
-| 容器支持 | 关 | `CONTAINERS=true`：LXC / Docker / Podman 需要的命名空间和 IPC，见下文 |
+| 容器 / Linux 桌面支持 | 开 | 能用 Droidspaces 等跑完整 Linux 和图形桌面，见下文；`CONTAINERS=false` 关闭 |
 | KMI 检查 | 开 | 编译时核对内核接口，保证 WiFi、相机等厂商模块能正常加载，见下文 |
 | PGO | 开 | 用一加源码自带的真机性能数据优化编译，热点代码更集中，又快又省电，见下文 |
 | ThinLTO | 开 | 可选 `none` / `thin` / `full`（full 配 PGO 需要 16 GB 以上内存） |
@@ -84,7 +84,7 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 - **Magisk**：Magisk 修补的是 `init_boot`，和内核互不影响，刷入通用内核后原来的 Magisk 照常工作。
 - **不要和 KernelSU 内核混用**：两套 root 同时存在会冲突。
 
-### 容器支持（`CONTAINERS=true`）
+### 容器 / Linux 桌面支持（`CONTAINERS=true`，默认开）
 
 打开后内核具备跑 LXC / Docker / Podman 的条件，容器有自己的进程树、IPC 和网络，可以用 systemd 当 1 号进程，速度接近原生。
 
@@ -118,7 +118,7 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 
 内核只提供能力，还需要一个用户态的容器工具。推荐 **Droidspaces**：专门为 Android 做的容器运行时，有图形界面，处理了 SELinux、网络等 Android 特有的问题，能跑带 systemd 的完整发行版。
 
-1. **刷入带容器支持的内核**（`CONTAINERS=true`，产物名带 `-Container`），开机。
+1. **刷入本项目的内核**（默认已带容器支持，产物名带 `-Container`），开机。
 2. **处理 SUSFS**（默认内核带 SUSFS）：在 SuSFS4KSU 的设置里关闭「HIDE SUS MOUNTS FOR ALL PROCESSES」，否则容器起不来；或者编译时直接 `SUSFS=false`。Droidspaces 官方不支持和 SUSFS 一起用。
 3. **安装 App**：从 [Droidspaces Releases](https://github.com/ravindu644/Droidspaces-OSS/releases/latest) 下载 APK 安装，授予 root。首次打开会自动把后端装到 `/data/local/Droidspaces/bin`。
    用 APatch 或 Magisk 的话，还要在 App 里开启「守护进程模式」并重启；KernelSU 不需要。
@@ -228,7 +228,7 @@ STOCK_BOOT=~/boot.img ./build.sh             # 同时生成可 fastboot 刷入�
 | `OPT` | `true` | 社区调优补丁（见第 2 节明细） |
 | `NTSYNC` | `false` | NTSync 同步原语（Wine/游戏兼容层） |
 | `TMPFS_XATTR` | `true` | tmpfs 的 xattr / POSIX ACL |
-| `CONTAINERS` | `false` | 容器支持（LXC / Docker / Podman） |
+| `CONTAINERS` | `true` | 容器 / Linux 桌面支持（Droidspaces、LXC、Docker） |
 | `ABI_CHECK` | `true` | 编基线核对 KMI 符号 CRC，不一致就不出包 |
 | `O3` | `false` | 用 -O3 而非 -O2 编译 |
 | `PGO` | `true` | 用一加真机性能数据（`pgo-profiles/`）优化编译 |

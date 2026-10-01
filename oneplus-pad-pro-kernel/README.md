@@ -1,5 +1,7 @@
 # 一加平板 Pro 玩机内核编译方案
 
+**简体中文** | [English](README.en.md)
+
 适用机型：**一加平板 Pro（OnePlus Pad Pro，国行）**，海外版 OnePlus Pad 2 硬件相同但源码分支不同（`oneplus_pad2_*.xml`），不要混用。
 
 ---
@@ -19,7 +21,7 @@
 **GKI 内核的边界**：CPU/GPU 频率表、温控、充电、屏幕等驱动都在厂商模块和设备树里（`vendor_boot` / `vendor_dlkm`），
 只换 GKI 内核**做不到超频、改温控墙**。这类需求用 Scene / uperf 之类的用户态调度方案更现实。
 
-**风险**：需要解锁 BL（会清空数据）；刷错会卡开机（按第 6 节可救回）；部分银行、支付类应用可能检测到解锁；OTA 前需要先还原官方 boot。
+**风险**：需要解锁 BL（会清空数据）；刷错会卡开机（按第 7 节可救回）；部分银行、支付类应用可能检测到解锁；OTA 前需要先还原官方 boot。
 
 ---
 
@@ -190,7 +192,7 @@ fastboot reboot
 
 ## 8. 进阶
 
-- **换 root 方案**：[SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra)（带 KPM）或 [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next)：把第 4 步的 `setup.sh` 地址换成对应项目的；它们集成 SUSFS 的方式与官方 KernelSU 不同，按各自文档调整第 5 步。
+- **换 root 方案**：[SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra)（带 KPM）或 [KernelSU-Next](https://github.com/KernelSU-Next/KernelSU-Next)：把 `build.sh` 第 4 步（KernelSU）里的 `setup.sh` 地址换成对应项目的；它们集成 SUSFS 的方式与官方 KernelSU 不同，按各自文档调整 `build.sh` 第 5 步（SUSFS）。
 - **为什么不用官方的 bazel 构建**：官方命令 `./kernel_platform/oplus/build/oplus_build_kernel.sh pineapple gki` 需要完整同步整个清单（含全部厂商模块和预编译工具，几十 GB）。只换 GKI 内核时，直接用 `make` 编译 `common` 就够了，社区项目也都这么做。
   注意一加的 `common` 里有几个软链接指向另一个仓库的 `vendor/oplus/kernel/*`（调度、锁优化、存储），缺了会在 Kconfig 阶段报 `can't open file "kernel/oplus_cpu/sched/Kconfig"`，脚本会自动只拉取这几个目录。
 - **跟进官方更新**：一加更新源码后重新运行脚本即可，脚本每次都会重新读取官方清单。

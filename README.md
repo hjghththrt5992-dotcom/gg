@@ -1,5 +1,7 @@
 # 一加平板 Pro 玩机内核
 
+**简体中文** | [English](README.en.md)
+
 一加平板 Pro（OnePlus Pad Pro，骁龙 8 Gen 3 / SM8650）的 GKI 内核编译方案：
 基于一加官方开源源码，集成 KernelSU、SUSFS、BBR / BBRv3 和一组社区调优补丁，
 输出 AnyKernel3 卡刷包，可选输出能直接 fastboot 刷入的 `boot.img`。

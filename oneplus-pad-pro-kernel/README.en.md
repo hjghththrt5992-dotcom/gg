@@ -128,7 +128,23 @@ The kernel only provides the capability; you still need a user-space container t
 
 Networking defaults to "host mode", sharing the tablet's network, which is the simplest; choose "NAT mode" for isolation and port forwarding.
 
-#### Graphical desktop (Linux GUI)
+#### Recommended: a development environment in the browser (code-server)
+
+No X11 and no extra apps: run code-server (VS Code in the browser) in the container and open it in the tablet's browser to get a full editor, terminal and extension marketplace, with touch, keyboard and copy/paste all working.
+
+1. Start a container as described above (Debian / Ubuntu is easiest) and keep the default **host mode** networking.
+2. Run the one-step script in the container terminal (as root; the user name is optional and defaults to root):
+   `curl -fsSL https://raw.githubusercontent.com/hjghththrt5992-dotcom/gg/main/oneplus-pad-pro-kernel/container/setup-code-server.sh | bash -s -- <user>`
+3. The script prints the address and password at the end. Open `http://127.0.0.1:8080` in the tablet's browser and enter the password.
+4. In the Chrome menu choose "Add to Home screen" or "Install app" to open it full screen like a standalone app.
+
+What the script does: installs code-server with its official install script (the official deb / rpm package on Debian / Ubuntu / Fedora, the official standalone build elsewhere); writes a config that **listens only on 127.0.0.1** (other devices on the same Wi-Fi can't connect) with a random password and file permissions 600; enables it with systemd so it starts whenever the container starts. Change the port with an environment variable such as `PORT=8090`; an existing config is never overwritten.
+
+The full flow was tested on Ubuntu 24.04: installation, config generation, redirect to the login page when not logged in, rejection of a wrong password, access to the editor with the right password, listening only on 127.0.0.1, and refusal of access from another address. Not tested on the device (arm64 container); code-server provides official arm64 packages.
+
+Note: the script downloads from GitHub, which may need a proxy on some networks. If the container uses NAT mode, 127.0.0.1 is no longer shared with Android; switch back to host mode.
+
+#### Graphical desktop (X11, optional)
 
 On the kernel side, **container support is all you need**; no extra options. Checked item by item against the Droidspaces `check` source: namespaces, devtmpfs, loop, ext4, overlayfs, FUSE, TUN, veth, bridge, cgroup v2, and the SysV IPC used by X11 shared memory are all present in the container build. Display goes through the Termux:X11 app, and GPU acceleration goes through the Turnip driver using the tablet's existing Adreno driver.
 

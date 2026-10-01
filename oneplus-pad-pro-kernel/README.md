@@ -128,7 +128,23 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 
 网络默认是「主机模式」，和平板共用网络，最省事；要隔离就选「NAT 模式」，还能配端口转发。
 
-#### 图形桌面（Linux 界面）
+#### 推荐：浏览器里的开发环境（code-server）
+
+不需要 X11，也不用装额外的 App：容器里跑 code-server（浏览器版 VS Code），平板用浏览器打开就是完整的编辑器、终端和插件市场，触屏、键盘、复制粘贴都正常。
+
+1. 按上面的步骤启动一个容器（Debian / Ubuntu 最省心），网络保持默认的**主机模式**。
+2. 在容器终端里运行一键脚本（以 root 运行，用户名可省略，默认 root）：
+   `curl -fsSL https://raw.githubusercontent.com/hjghththrt5992-dotcom/gg/main/oneplus-pad-pro-kernel/container/setup-code-server.sh | bash -s -- 用户名`
+3. 脚本最后会打印地址和密码。在平板浏览器打开 `http://127.0.0.1:8080`，输入密码。
+4. Chrome 菜单里选「添加到主屏幕」或「安装应用」，之后像独立 App 一样全屏打开。
+
+脚本做了这些事：用 code-server 官方安装脚本装好（Debian / Ubuntu / Fedora 装官方 deb / rpm 包，其他发行版装官方独立版）；生成配置，**只监听 127.0.0.1**（同一 WiFi 里的其他设备连不上）并设随机密码，配置文件权限 600；用 systemd 设为开机自启，容器一启动就能用。端口用 `PORT=8090` 之类的环境变量修改；已有配置不会被覆盖。
+
+已在 Ubuntu 24.04 上实测完整流程：安装、生成配置、未登录被重定向到登录页、错误密码进不去、正确密码进入编辑器、只监听 127.0.0.1、从其他地址访问被拒。真机（arm64 容器）未测，code-server 官方提供 arm64 安装包。
+
+注意：脚本要从 GitHub 下载，国内网络可能需要代理。如果容器用的是 NAT 模式，127.0.0.1 就不是同一个了，请改回主机模式。
+
+#### 图形桌面（X11，可选）
 
 内核这边**打开容器支持就够了**，不需要额外选项。已对照 Droidspaces 的 `check` 源码逐项核对：命名空间、devtmpfs、loop、ext4、overlayfs、FUSE、TUN、veth、网桥、cgroup v2，以及 X11 共享内存要用的 SysV IPC，容器构建全部满足。显示走 Termux:X11 App，GPU 加速走 Turnip 驱动，直接用平板现有的 Adreno 驱动。
 

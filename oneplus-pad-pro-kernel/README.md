@@ -30,7 +30,7 @@
 | 路线 | 适合谁 | 说明 |
 | --- | --- | --- |
 | A. 用社区成品 | 只想用，不想折腾编译 | [WildKernels/OnePlus_KernelSU_SUSFS](https://github.com/WildKernels/OnePlus_KernelSU_SUSFS) 有 `OP-PAD-PRO` 配置，Release 里下载对应系统版本的 AnyKernel3 包 |
-| B. GitHub Actions 云编译 | 没有 Linux 电脑 | 用本仓库的工作流，网页上点一下，约半小时出包（4 核环境实测编译 13 分钟） |
+| B. GitHub Actions 云编译 | 没有 Linux 电脑 | 用本仓库的工作流，网页上点一下，约半小时出包（4 核环境实测：不带 PGO 13 分钟，带 PGO 首次 21 分钟）；开着 KMI 检查时第一次要多编一个基线，约一小时 |
 | C. 本地编译 | 想改源码、加补丁 | 运行本目录的 `build.sh` |
 
 B 和 C 用的是同一个脚本，下面的内容对两者都适用。
@@ -41,7 +41,7 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 
 | 功能 | 默认 | 说明 |
 | --- | --- | --- |
-| KernelSU（官方 tiann/KernelSU） | 开 | 内核级 root，内置，不再需要修补 init_boot |
+| KernelSU（官方 tiann/KernelSU） | 开 | 内核级 root，内置，不再需要修补 init_boot。`KSU=false` 就是通用内核，可配合 APatch / Magisk，见下文 |
 | SUSFS | 开 | 隐藏 root 痕迹（挂载、路径、uname、cmdline 等），配合 SUSFS 模块使用 |
 | BBR + BBRv3 | 开（非默认算法） | 开机后 `sysctl -w net.ipv4.tcp_congestion_control=bbr3`；`BBR_DEFAULT=true` 可设为默认 |
 | 队列调度 FQ/CAKE/PIE | 开 | 配合 BBR 用，降低网络延迟、缓解 bufferbloat |
@@ -49,7 +49,10 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 | 社区调优补丁（20 个） | 开 | 内存/调度/文件系统/功耗微调，见下表；`OPT=false` 关闭 |
 | NTSync | 关 | Wine/游戏兼容层同步原语；`NTSYNC=true` 开启 |
 | tmpfs xattr / ACL | 开 | 部分模块和容器方案需要 |
-| ThinLTO | 开 | 可选 `none` / `thin` / `full` |
+| 容器 / Linux 桌面支持 | 开 | 能用 Droidspaces 等跑完整 Linux 和图形桌面，见下文；`CONTAINERS=false` 关闭 |
+| KMI 检查 | 开 | 编译时核对内核接口，保证 WiFi、相机等厂商模块能正常加载，见下文 |
+| PGO | 开 | 用一加源码自带的真机性能数据优化编译，热点代码更集中，又快又省电，见下文 |
+| ThinLTO | 开 | 可选 `none` / `thin` / `full`（full 配 PGO 需要 16 GB 以上内存） |
 | O3 优化 | 关 | `O3=true` 用 -O3 编译（更激进，体积更大，未必更快） |
 | 版本号伪装 | 开 | `uname -r` 形如 `6.1.118-android14-11`，编译用户/主机与官方一致（`kleaf@build-host`），不带 git 哈希 |
 | 删除 `abi_gki_protected_exports` | 必做 | 自编内核签名密钥与官方不同，不删的话 WiFi 等模块会加载失败 |
@@ -71,6 +74,123 @@ B 和 C 用的是同一个脚本，下面的内容对两者都适用。
 | 杂项 | silence_system_logspam / silence_irq_cpu_logspam | 减少无用日志刷屏 |
 
 这些都是数值微调和局部优化，社区在一加/骁龙设备上长期使用；提升偏“跟手感/续航”这类体感，不是跑分暴涨，介意稳定可 `OPT=false`。
+
+### 通用内核（`KSU=false`）：配合 APatch / Magisk
+
+关掉 KernelSU 后，内核不内置任何 root（SUSFS 依赖 KernelSU，会自动一起关掉），其他优化照旧。产物文件名带 `-Generic`。
+
+- **APatch**：APatch 直接修补 `boot.img` 里的内核，内核需要 `KALLSYMS` 和 `KALLSYMS_ALL`，脚本会确认这两项开着。
+  本项目**不在编译时预先打 APatch 补丁**：APatch 需要一个超级密钥（SuperKey），相当于 root 密码，公开的构建如果内置了它，等于所有人都知道。请在 APatch App 里用你自己的 SuperKey 修补本项目输出的 `boot.img`，再刷入，见第 6.5 节。
+- **Magisk**：Magisk 修补的是 `init_boot`，和内核互不影响，刷入通用内核后原来的 Magisk 照常工作。
+- **不要和 KernelSU 内核混用**：两套 root 同时存在会冲突。
+
+### 容器 / Linux 桌面支持（`CONTAINERS=true`，默认开）
+
+打开后内核具备跑 LXC / Docker / Podman 的条件，容器有自己的进程树、IPC 和网络，可以用 systemd 当 1 号进程，速度接近原生。
+
+| 打开的选项 | 用途 |
+| --- | --- |
+| `PID_NS` | 容器有独立的进程树，systemd 才能当 1 号进程 |
+| `SYSVIPC` / `POSIX_MQUEUE` / `IPC_NS` | 进程间通信及其隔离，数据库、systemd 等依赖 |
+| `USER_NS` | 用户命名空间（已限制为只有 root 能创建） |
+| `DEVTMPFS` | 容器里自动生成 `/dev` 设备节点 |
+| `NETFILTER_XT_TARGET_LOG` / `MATCH_RECENT` | 容器内 UFW、Fail2ban 等防火墙常用（REJECT 由官方已开的 `IP_NF_TARGET_REJECT` 提供） |
+
+网络（veth、bridge、NAT）、cgroup v2、overlayfs、seccomp 官方内核本来就有。同时会打三个社区补丁，缺一不可，任何一个打不上就停止编译：
+
+- **SYSVIPC 接口修补**：SYSVIPC 会往进程结构 `task_struct` 里加字段，补丁把它们放进 Google 预留的空位，保持接口不变。
+- **oplus_bsp_midas 修补**：开了 PID 命名空间后，一加的这个功耗统计模块按 PID 查进程时会查不到，又不检查空指针，导致死机。补丁只对这个模块返回一个占位进程。属于绕过式修复，不改任何接口。
+- **USER_NS 限制**：只允许 root 创建用户命名空间，普通应用拿不到，避免扩大攻击面。
+
+**实测**：打开容器支持后 KMI 检查通过，全部 15243 个导出符号的 CRC 与官方一致。用 Docker 官方的 `check-config.sh` 检查，"基本必需"项从缺 6 个降到缺 3 个，剩下的 3 个是有意不开的：
+
+| 没开的选项 | 为什么 | 对 Docker 的影响 |
+| --- | --- | --- |
+| `CGROUP_DEVICE`（以及可选的 `CGROUP_PIDS`） | 会改变 cgroup 结构的大小 | cgroup v2 下 Docker 改用 BPF 管设备（已支持）；只是不能限制容器进程数 |
+| `BRIDGE_NETFILTER` | 会让网络包扩展的编号整体后移 | Docker 会告警，容器之间的流量不经过 iptables；默认桥接网络仍可用，有问题可改用 `--network host` |
+| `NETFILTER_XT_MATCH_IPVS` | 依赖 `IP_VS`，会改变网络命名空间结构 | 只有 Swarm 集群模式需要 |
+
+这几项是实测过的：一起打开后有 2880 个 KMI 符号的 CRC 改变，刷进去厂商模块会全部加载失败。
+
+本项目的容器配置与 [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) 官方给 GKI 内核的清单一致，用的也是同一个 SYSVIPC 补丁。
+
+#### 怎么启动容器
+
+内核只提供能力，还需要一个用户态的容器工具。推荐 **Droidspaces**：专门为 Android 做的容器运行时，有图形界面，处理了 SELinux、网络等 Android 特有的问题，能跑带 systemd 的完整发行版。
+
+1. **刷入本项目的内核**（默认已带容器支持，产物名带 `-Container`），开机。
+2. **处理 SUSFS**（默认内核带 SUSFS）：在 SuSFS4KSU 的设置里关闭「HIDE SUS MOUNTS FOR ALL PROCESSES」，否则容器起不来；或者编译时直接 `SUSFS=false`。Droidspaces 官方不支持和 SUSFS 一起用。
+3. **安装 App**：从 [Droidspaces Releases](https://github.com/ravindu644/Droidspaces-OSS/releases/latest) 下载 APK 安装，授予 root。首次打开会自动把后端装到 `/data/local/Droidspaces/bin`。
+   用 APatch 或 Magisk 的话，还要在 App 里开启「守护进程模式」并重启；KernelSU 不需要。
+4. **自检**：设置（齿轮）→ 需求 → 检查需求，或在终端运行 `su -c droidspaces check`。必需项应该全绿，可选项有黄色警告不影响使用。
+5. **装一个发行版**：容器页 → 「+」上方的云图标 → 选发行版（Debian、Ubuntu、Arch 等）→ 下载 → 安装。向导里推荐选「稀疏镜像」类型，在 f2fs 上更稳。
+6. **启动和进入**：在容器卡片上点「启动」，然后到面板页点这个容器，用内置终端进入；或者复制登录命令到 Termux 里运行，形如 `su -c 'droidspaces --name=容器名 enter 用户名'`。
+
+新建容器的网络默认是 **NAT**：容器有自己独立的网络（连同自己的 127.0.0.1），平板要访问容器里的服务，得在「编辑容器配置 → 网络 → 端口转发」里加端口。改成「主机」模式则和平板共用网络，最省事，但没有网络隔离。
+
+#### 推荐：浏览器里的开发环境（code-server）
+
+不需要 X11，也不用装额外的 App：容器里跑 code-server（浏览器版 VS Code），平板用浏览器打开就是完整的编辑器、终端和插件市场，触屏、键盘、复制粘贴都正常。
+
+1. 按上面的步骤启动一个容器（Debian / Ubuntu 最省心），在容器配置里打开 **「Android 存储」**。网络二选一，改完重启容器：
+   - 保持默认的 NAT：在「编辑容器配置 → 网络 → 端口转发」里**添加 8080**（推荐，保留网络隔离）；
+   - 或者把网络模式改成**「主机」**。
+2. 把 [`container/setup-code-server.sh`](container/setup-code-server.sh) 存到平板的「下载」文件夹，在容器终端里运行（以 root 运行，用户名可省略，默认 root）：
+   `bash /storage/emulated/0/Download/setup-code-server.sh 用户名`
+   能直连 GitHub 的话，也可以一条命令：`curl -fsSL https://raw.githubusercontent.com/hjghththrt5992-dotcom/gg/main/oneplus-pad-pro-kernel/container/setup-code-server.sh | bash -s -- 用户名`
+3. 脚本最后会打印地址和密码。在平板浏览器打开它打印的地址（按上面配好的话就是 `http://127.0.0.1:8080`），输入密码。
+4. Chrome 菜单里选「添加到主屏幕」或「安装应用」，之后像独立 App 一样全屏打开。
+
+脚本做了这些事：
+- **下载**：先试 GitHub，连不上（国内常见的 `Connection reset by peer`）就自动换[中科大镜像](https://mirrors.ustc.edu.cn/github-release/coder/code-server/)（它同步 code-server 的最新版）。两边都不通时，可以用浏览器先把安装包下载到平板，再用 `CS_PKG_FILE=/storage/emulated/0/Download/文件名 bash …` 离线安装。也可以用 `CS_SOURCE=ustc` 直接走镜像。
+- **安装**：Debian / Ubuntu 装官方 deb 包（没有依赖、自带 systemd 服务），其他发行版装官方独立版压缩包。不再依赖 GitHub 上的官方安装脚本。
+- **识别网络模式**：读取 Droidspaces 写在容器里的 `/run/droidspaces/container.config`。主机模式**只监听 127.0.0.1**（同一 WiFi 里的其他设备连不上）；NAT 模式监听容器自己的网卡，通过端口转发从平板的 `127.0.0.1:端口` 访问（端口转发对同一 WiFi 也开放，有密码保护）；NAT 没配端口转发时，打印容器 IP 作为临时地址，并提示怎么改；「无」网络直接报错。
+- **配置**：随机密码，配置文件权限 600；端口用 `PORT=8090` 之类修改。重复运行不会重新下载、不会改密码，只按当前网络模式调整监听地址并重启 code-server（要升级加 `CS_REINSTALL=1`）。
+- **启动和自检**：有 systemd 就设为开机自启；没有就生成 `code-server-start` 命令，现在先启动一次，以后每次启动容器后运行它。启动后检查端口，40 秒内没起来就打印日志。
+
+已在 Ubuntu 24.04 上实测：GitHub 不通时自动换镜像（用本地仿镜像服务器模拟）、GitHub 直连、离线独立版压缩包、两个源都不通时的提示；以及未登录被重定向到登录页、错误密码进不去、正确密码进入编辑器、只监听 127.0.0.1、从其他地址访问被拒。网络模式用仿造的 `container.config` 测试：主机 / NAT（有无端口转发、端口范围）/ 无 之间来回切换时监听地址和打印的地址都正确，旧进程会被换掉；普通用户、沿用上次端口、配置写错时打印日志也测了。真机（arm64 容器、真实的 Droidspaces 端口转发、systemd 容器）和真实的中科大镜像未测（这边的环境做不到），code-server 官方提供 arm64 安装包。
+
+**浏览器显示「拒绝连接」**：多半是容器用的是默认的 NAT 网络又没配端口转发，容器里的 127.0.0.1 和 Android 的不是同一个。按第 1 步加端口转发 8080 或改成主机模式，重启容器后再运行一次脚本（不会重新下载）。容器里没有 systemd 时，每次重启容器后还要运行一次 `code-server-start`。
+
+#### 图形桌面（X11，可选）
+
+内核这边**打开容器支持就够了**，不需要额外选项。已对照 Droidspaces 的 `check` 源码逐项核对：命名空间、devtmpfs、loop、ext4、overlayfs、FUSE、TUN、veth、网桥、cgroup v2，以及 X11 共享内存要用的 SysV IPC，容器构建全部满足。显示走 Termux:X11 App，GPU 加速走 Turnip 驱动，直接用平板现有的 Adreno 驱动。
+
+1. 安装 **Termux** 和 **Termux:X11**，在 Termux 里运行一次 Droidspaces 的安装脚本（装显示和声音组件）：
+   `curl -fsSL https://github.com/ravindu644/Droidspaces-OSS/raw/refs/heads/dev/scripts/setup-termux.sh | bash`
+2. 在 Droidspaces 的发行版仓库里搜 **XFCE**，装官方 XFCE 版（自带桌面自动启动）。
+3. 容器配置里打开「配置 Termux:X11」（要声音再开「配置 PulseAudio」），启动容器，打开 Termux:X11 就能看到桌面。这一步是软件渲染。
+4. **GPU 加速**（Adreno 750 已被 [Mesa for Android Container](https://github.com/lfdevs/mesa-for-android-container) 支持）：在容器里装它对应发行版的包，解压到 `/` 后运行 `ldconfig`；容器配置打开「GPU Access」，**关闭「VirGL」**，加环境变量 `MESA_LOADER_DRIVER_OVERRIDE=kgsl` 和 `TU_DEBUG=noconform`。用 `glxinfo -B` 看到 Turnip / Adreno 750 即生效。
+5. 3K 屏渲染压力大，卡的话在 Termux:X11 设置里降低分辨率或改用缩放。
+
+详见 Droidspaces 的「显示、音频与桌面」文档。目前 Droidspaces 的社区设备列表里还没有骁龙 8 Gen 3 机型，本项目也未在真机上验证过这套流程。
+
+也可以用 LXC 等其他工具，刷入后可在平板上运行 Docker 的 `check-config.sh` 或 `lxc-checkconfig` 自查（它们读 `/proc/config.gz`）。但 Termux 的 root 软件源里目前已经没有 docker 包，lxc 也停在很老的 3.1 版，在 Android 上自己搭比 Droidspaces 麻烦得多。
+
+### PGO（`PGO=true`，默认开）：用真机数据优化编译
+
+一加在源码里放了一份真机采集的性能数据 `pgo-profiles/vmlinux_v1.profdata`（IR 插桩，覆盖 51398 个函数），最热的是时钟读取、zram 压缩（swap / LZ4）、Binder、CPU 调频和 SELinux 查询，正是平板的日常负载。一加还改了编译规则：开启 `ARCH_SUPPORTS_PGO_CLANG` 后，这份数据会作用到每个文件（个别目录按一加的规则排除），跨模块内联上限也从 5 放宽到 60。开源的构建脚本里没有启用它，无法确认一加官方是否用了。
+
+编译器据此把热点代码集中摆放、冷门代码挪开，CPU 指令缓存更容易命中，同样的工作执行的指令和缓存缺失更少，既快又省电。
+
+实测（thin LTO）：
+- 编译后的位码里确实带着真机调用次数（如 `mm/swapfile.o` 有 30 个函数带计数），一加规则排除的 `mm/kasan` 没有，作为对照
+- 链接后热点代码 1613 段集中在 0.9 MB 内，冷代码 3.3 万段（6.7 MB）被移开
+- KMI 检查通过，没有栈帧超限警告；峰值内存 9.2 GB，首次编译 21 分钟；`Image` 大约 0.8 MB（更多内联）
+
+**为什么不默认 full LTO**：一加自己的构建脚本标注 full LTO「性能更好」，但实测 full LTO + PGO 在链接时超过 14 GB 内存被系统杀掉，16 GB 的 GitHub 机器同样跑不下来，所以默认 thin LTO + PGO。内存足够的机器可以自己试 `LTO=full`。
+
+**省电还能做什么**：CPU 调频策略、调度器（高通 WALT、一加调度优化）、温控、GPU 都在厂商模块里，GKI 内核改不到。内核这边能做的（编译优化、上面的调优补丁、官方已开启的 MGLRU 内存回收）基本都已做了；要进一步省电，用系统自带的省电模式，或 Scene、uperf 这类用户态调度工具调整调频和核心分配。
+
+### KMI 检查（`ABI_CHECK=true`，默认开）
+
+厂商模块（WiFi、相机、触控等）是按官方内核编译的，只认官方 GKI 导出的 KMI 符号及其校验值（CRC）。任何改动只要让其中一个符号的 CRC 变了，引用它的模块就会拒绝加载，症状是刷完 WiFi / 相机失灵。
+
+开启后脚本会多编一个「官方源码 + 官方配置」的基线，编完正式内核后，把 KMI 清单（`abi_gki_aarch64` 加上 `_qcom`、`_oplus` 等全部附加清单，共 8000 多个符号）逐个比对 CRC，不一致就报错、不出包。基线按源码 commit 缓存，只有第一次编译会多花一倍时间。
+
+已实测：默认配置（KernelSU + SUSFS + 调优补丁 + BBRv3 + 网络扩展）与官方基线相比，全部 15243 个导出符号的 CRC 都没变，只新增了 ipset 等 33 个符号；加上 PGO 后 KMI 检查同样通过。
+
+注意：这项检查能发现接口签名的变化，但不能保证内核行为完全正确，真机测试仍然必要。
 
 ---
 
@@ -121,7 +241,7 @@ STOCK_BOOT=~/boot.img ./build.sh             # 同时生成可 fastboot 刷入�
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `ANDROID_VER` | `16` | 平板系统大版本：14 / 15 / 16 |
-| `KSU` | `true` | 集成 KernelSU |
+| `KSU` | `true` | 内置 KernelSU；`false` 为通用内核，可配合 APatch / Magisk |
 | `KSU_REF` | `main` | KernelSU 分支 / tag / commit |
 | `SUSFS` | `true` | 集成 SUSFS（需要 `KSU=true`） |
 | `SUSFS_REF` | `gki-android14-6.1` | SUSFS 分支 / commit |
@@ -132,8 +252,11 @@ STOCK_BOOT=~/boot.img ./build.sh             # 同时生成可 fastboot 刷入�
 | `OPT` | `true` | 社区调优补丁（见第 2 节明细） |
 | `NTSYNC` | `false` | NTSync 同步原语（Wine/游戏兼容层） |
 | `TMPFS_XATTR` | `true` | tmpfs 的 xattr / POSIX ACL |
+| `CONTAINERS` | `true` | 容器 / Linux 桌面支持（Droidspaces、LXC、Docker） |
+| `ABI_CHECK` | `true` | 编基线核对 KMI 符号 CRC，不一致就不出包 |
 | `O3` | `false` | 用 -O3 而非 -O2 编译 |
-| `LTO` | `thin` | `none` / `thin` / `full` |
+| `PGO` | `true` | 用一加真机性能数据（`pgo-profiles/`）优化编译 |
+| `LTO` | `thin` | `none` / `thin` / `full`（full 配 PGO 需要 16 GB 以上内存） |
 | `PATCHES_REF` | 固定 commit | WildKernels/kernel_patches 的 commit，可换新 |
 | `LOCALVERSION_STR` | `-android14-11` | `uname -r` 中版本号之后的后缀 |
 | `STOCK_BOOT` | 空 | 官方 boot.img 路径，用于生成可直接刷入的 boot.img |
@@ -178,6 +301,15 @@ fastboot reboot
 2. 需要隐藏 root 的话，在管理器里安装 SUSFS 模块（[susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) 仓库中的 `ksu_module_susfs`，或社区维护的 susfs4ksu-module）。
 3. `adb shell uname -a` 确认内核版本已变化。
 
+### 6.5 通用内核配合 APatch
+
+1. 编译时设 `KSU=false`，并提供与当前系统版本一致的官方 boot.img（本地用 `STOCK_BOOT`，云编译填 `stock_boot_url`），得到 `*-Generic-boot.img`。
+2. 把它拷到平板，在 APatch App 里选择修补这个文件，设置你自己的 SuperKey（务必记住），得到修补后的镜像。
+3. 拷回电脑：`fastboot flash boot <修补后的镜像>`，重启后在 APatch App 里输入 SuperKey。
+
+APatch 的补丁就在内核里，所以**以后每次换内核都要重新修补**。用卡刷包更新内核会直接覆盖掉 APatch，重启后 root 就没了，建议 APatch 用户只用 boot.img 这条路。
+配合 Magisk 则不受影响：通用内核用 6.2 或 6.3 的方式刷入即可，Magisk 在 `init_boot` 里，不用重新修补。
+
 ---
 
 ## 7. 救砖与升级
@@ -206,6 +338,9 @@ SUSFS 会跟随官方 KernelSU `main` 分支同步（提交记录里的 “Sync 
 
 **KernelSU 管理器提示版本不匹配？**
 管理器版本要和内核里的 KernelSU 版本对应，`build-info.txt` 中记录了编译时用的 KernelSU 版本。
+
+**报「KMI 被破坏」、不出包？**
+说明某个改动让厂商模块要用的内核符号变了，刷进去 WiFi、相机等会失灵，所以脚本拒绝出包。日志里会列出变化的符号，关掉最近打开的功能（或换回默认的 `PATCHES_REF`）再编。不建议用 `ABI_CHECK=false` 硬绕过。
 
 **`CONFIG_xxx 未能启用`？**
 脚本会检查关键配置是否真的生效，报这个错说明该选项的依赖在当前源码里不满足，按提示去掉对应功能或补上依赖。

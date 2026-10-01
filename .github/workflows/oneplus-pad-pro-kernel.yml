@@ -9,7 +9,7 @@ on:
         options: ['16', '15', '14']
         default: '16'
       ksu:
-        description: '集成 KernelSU'
+        description: '内置 KernelSU（关闭 = 通用内核，可配合 APatch / Magisk）'
         type: boolean
         default: true
       susfs:
@@ -28,8 +28,20 @@ on:
         description: 'NTSync（Wine/游戏兼容层）'
         type: boolean
         default: false
+      containers:
+        description: '容器 / Linux 桌面支持（Droidspaces、LXC、Docker）'
+        type: boolean
+        default: true
+      abi_check:
+        description: 'KMI 检查（多编一个官方基线核对接口，耗时约翻倍，建议保持开启）'
+        type: boolean
+        default: true
+      pgo:
+        description: 'PGO（用一加源码自带的真机性能数据优化编译）'
+        type: boolean
+        default: true
       lto:
-        description: 'LTO 模式'
+        description: 'LTO 模式（full 加 PGO 链接时需要 16 GB 以上内存，GitHub 机器会爆内存，不建议）'
         type: choice
         options: [thin, full, none]
         default: thin
@@ -74,6 +86,14 @@ jobs:
           key: ccache-padpro-a${{ inputs.android_ver }}-${{ inputs.lto }}-${{ github.run_id }}
           restore-keys: ccache-padpro-a${{ inputs.android_ver }}-${{ inputs.lto }}-
 
+      - name: 恢复 ABI 基线缓存
+        uses: actions/cache@v6
+        with:
+          # 文件名里带内核源码 commit，一加更新源码后脚本会自动重编基线
+          path: ${{ runner.temp }}/work/abi-baseline-*.symvers
+          key: abi-baseline-a${{ inputs.android_ver }}-${{ inputs.lto }}-${{ github.run_id }}
+          restore-keys: abi-baseline-a${{ inputs.android_ver }}-${{ inputs.lto }}-
+
       - name: 下载官方 boot.img
         if: inputs.stock_boot_url != ''
         env:
@@ -88,7 +108,10 @@ jobs:
           OPT: ${{ inputs.opt }}
           BBR_DEFAULT: ${{ inputs.bbr_default }}
           NTSYNC: ${{ inputs.ntsync }}
+          CONTAINERS: ${{ inputs.containers }}
+          ABI_CHECK: ${{ inputs.abi_check }}
           LTO: ${{ inputs.lto }}
+          PGO: ${{ inputs.pgo }}
           O3: ${{ inputs.o3 }}
           KSU_REF: ${{ inputs.ksu_ref }}
           SUSFS_REF: ${{ inputs.susfs_ref }}

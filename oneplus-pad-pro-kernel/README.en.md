@@ -126,28 +126,31 @@ The kernel only provides the capability; you still need a user-space container t
 5. **Install a distribution:** Containers tab → cloud icon above "+" → pick a distribution (Debian, Ubuntu, Arch, etc.) → Download → Install. In the wizard, the "sparse image" type is recommended for better stability on f2fs.
 6. **Start and enter it:** tap "Start" on the container card, then open the container in the Panel tab and use the built-in terminal; or copy the login command into Termux, which looks like `su -c 'droidspaces --name=<container> enter <user>'`.
 
-Networking defaults to "host mode", sharing the tablet's network, which is the simplest; choose "NAT mode" for isolation and port forwarding.
+New containers default to **NAT** networking: the container has its own network (including its own 127.0.0.1), so to reach a service inside it from the tablet you add a port under "Edit Container Configuration → Networking → Port Forwarding". "Host" mode shares the tablet's network, which is the simplest but gives no network isolation.
 
 #### Recommended: a development environment in the browser (code-server)
 
 No X11 and no extra apps: run code-server (VS Code in the browser) in the container and open it in the tablet's browser to get a full editor, terminal and extension marketplace, with touch, keyboard and copy/paste all working.
 
-1. Start a container as described above (Debian / Ubuntu is easiest), keep the default **host mode** networking, and turn on **"Android storage"** in the container config.
+1. Start a container as described above (Debian / Ubuntu is easiest) and turn on **"Android storage"** in the container config. For networking, pick one and restart the container afterwards:
+   - keep the default NAT and **add port 8080** under "Edit Container Configuration → Networking → Port Forwarding" (recommended, keeps network isolation);
+   - or change the network mode to **"Host"**.
 2. Save [`container/setup-code-server.sh`](container/setup-code-server.sh) to the tablet's Download folder and run it in the container terminal (as root; the user name is optional and defaults to root):
    `bash /storage/emulated/0/Download/setup-code-server.sh <user>`
    If GitHub is reachable directly, a single command also works: `curl -fsSL https://raw.githubusercontent.com/hjghththrt5992-dotcom/gg/main/oneplus-pad-pro-kernel/container/setup-code-server.sh | bash -s -- <user>`
-3. The script prints the address and password at the end. Open `http://127.0.0.1:8080` in the tablet's browser and enter the password.
+3. The script prints the address and password at the end. Open the printed address in the tablet's browser (with the setup above it is `http://127.0.0.1:8080`) and enter the password.
 4. In the Chrome menu choose "Add to Home screen" or "Install app" to open it full screen like a standalone app.
 
 What the script does:
 - **Download:** tries GitHub first; if it can't connect (for example `Connection reset by peer`, common in mainland China) it switches automatically to the [USTC mirror](https://mirrors.ustc.edu.cn/github-release/coder/code-server/), which mirrors the latest code-server release. If neither works, download the package to the tablet with a browser first and install offline with `CS_PKG_FILE=/storage/emulated/0/Download/<file> bash …`. `CS_SOURCE=ustc` uses the mirror directly.
 - **Install:** the official deb package on Debian / Ubuntu (no dependencies, ships a systemd service), the official standalone tarball elsewhere. It no longer depends on the official install script hosted on GitHub.
-- **Config:** **listens only on 127.0.0.1** (other devices on the same Wi-Fi can't connect), random password, file permissions 600; change the port with something like `PORT=8090`; an existing config is never overwritten.
-- **Start on boot:** enabled with systemd so it runs whenever the container starts.
+- **Detects the network mode:** reads `/run/droidspaces/container.config`, which Droidspaces writes inside the container. In host mode it **listens only on 127.0.0.1** (other devices on the same Wi-Fi can't connect); in NAT mode it listens on the container's own interface and is reached through the port forward at the tablet's `127.0.0.1:<port>` (a port forward is also open to the same Wi-Fi, protected by the password); in NAT mode without a port forward it prints the container IP as a temporary address and explains what to change; "None" networking stops with an error.
+- **Config:** random password, file permissions 600; change the port with something like `PORT=8090`. Running it again doesn't download again or change the password; it only adjusts the listen address to the current network mode and restarts code-server (add `CS_REINSTALL=1` to upgrade).
+- **Start and self-check:** with systemd it is enabled to start with the container; without systemd it creates a `code-server-start` command, starts it now, and you run that command after each container start. After starting it checks the port and prints the log if nothing is listening within 40 seconds.
 
-Tested on Ubuntu 24.04: automatic switch to the mirror when GitHub is unreachable (simulated with a local fake mirror server), direct GitHub download, offline install from the standalone tarball, and the message when both sources fail; plus redirect to the login page when not logged in, rejection of a wrong password, access to the editor with the right password, listening only on 127.0.0.1, and refusal of access from another address. Not tested on the device (arm64 container) or against the real USTC mirror (unreachable from the test environment); code-server provides official arm64 packages.
+Tested on Ubuntu 24.04: automatic switch to the mirror when GitHub is unreachable (simulated with a local fake mirror server), direct GitHub download, offline install from the standalone tarball, and the message when both sources fail; plus redirect to the login page when not logged in, rejection of a wrong password, access to the editor with the right password, listening only on 127.0.0.1, and refusal of access from another address. Network modes were tested with a fake `container.config`: switching between host / NAT (with and without a port forward, and with a port range) / none gives the right listen address and printed address, and the old process is replaced; a non-root user, reusing the previous port, and printing the log for a broken config were also tested. Not tested on the device (arm64 container, real Droidspaces port forwarding, a systemd container) or against the real USTC mirror (not possible from the test environment); code-server provides official arm64 packages.
 
-Note: if the container uses NAT mode, 127.0.0.1 is no longer shared with Android; switch back to host mode.
+**The browser says "connection refused":** most likely the container uses the default NAT networking without a port forward, so the container's 127.0.0.1 is not Android's. Add port forward 8080 or switch to host mode as in step 1, restart the container, and run the script again (it won't download again). If the container has no systemd, also run `code-server-start` after each container restart.
 
 #### Graphical desktop (X11, optional)
 

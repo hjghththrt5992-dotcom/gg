@@ -21,6 +21,8 @@
 
 ## 快速开始
 
+**不需要准备任何资料**：项目自带一个知识库（`llm/kb/docs/`，13 篇 AI/大模型基础知识，约 1.6 万字），下面的命令直接用它训练。
+
 需要 Python 3.9 及以上版本。在项目根目录执行：
 
 ```bash
@@ -38,7 +40,7 @@ python llm/main.py web                     # 网页问答，浏览器打开 http
 
 **想让生成训练数据更快？**`pip install llama-cpp-python`，然后运行 `python llm/main.py download --gguf`。改写和出题会自动改用 4bit 量化模型，速度快 2～4 倍。
 
-## 换成你自己的知识库
+## 换成你自己的知识库（可选）
 
 1. 把文档放进 `llm/kb/docs/`（可以建子文件夹），支持 **md / txt / html / pdf / docx**，然后删掉自带的示例文档
 2. 运行 `python llm/main.py auto --rebuild`

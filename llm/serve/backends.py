@@ -1,6 +1,7 @@
 """模型推理后端：
-- llama.cpp（GGUF 4bit 量化）：最快、最省内存，老电脑首选，需要 pip install llama-cpp-python
-- transformers：无需额外安装，可直接加载 LoRA 微调结果
+- transformers：无需额外安装，可直接加载 LoRA 训练结果
+- llama.cpp（GGUF 4bit 量化）：最快、最省内存，需要 pip install llama-cpp-python；
+  适合用底座模型批量生成训练数据，或运行合并并量化后的训练结果
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from threading import Thread
 from typing import Iterator
 
 from common import dtype_kwargs, physical_cores, pick_device, render_chat, resolve_path
-from config import GGUF_MODELS, LLM_MODELS, MAX_NEW_TOKENS, OUTPUT_DIR, REPETITION_PENALTY, model_dir
+from config import GGUF_MODELS, LLM_MODELS, LORA_DIR, MAX_NEW_TOKENS, REPETITION_PENALTY, model_dir
 
 
 class HFBackend:
@@ -91,21 +92,23 @@ def adapter_base(adapter: Path) -> Path:
 
 
 def load_backend(size: str, backend: str = "auto", model: str | None = None, adapter: str | None = None,
-                 finetuned: bool = False):
-    """按优先级选择模型：--model 指定路径 > 微调结果 > GGUF 量化模型 > 原版模型。"""
-    if finetuned and adapter is None:
-        adapter = str(OUTPUT_DIR / "lora")
-    if adapter:
-        adapter_path = Path(adapter)
-        if not (adapter_path / "adapter_config.json").exists():
-            raise SystemExit(f"找不到 LoRA 微调结果：{adapter_path}，请先运行 train")
-        base = Path(model) if model else adapter_base(adapter_path)
-        return HFBackend(base, adapter_path)
+                 base: bool = False):
+    """选择模型。默认优先用训练好的模型（LoRA 结果）；base=True 时用原版底座模型（例如生成训练数据时）。
+
+    优先级：--model 指定的模型（目录或 .gguf）> 训练好的 LoRA > GGUF 量化底座 > 原版底座。
+    """
     if model:
         path = Path(model)
         if path.suffix == ".gguf":
             return LlamaCppBackend(path)
-        return HFBackend(path)
+        return HFBackend(path, Path(adapter) if adapter else None)
+    if not base:
+        adapter_path = Path(adapter) if adapter else LORA_DIR
+        if (adapter_path / "adapter_config.json").exists():
+            return HFBackend(adapter_base(adapter_path), adapter_path)
+        if adapter:
+            raise SystemExit(f"找不到训练结果：{adapter_path}")
+        print("[提示] 还没有训练好的模型，先使用原版底座模型。训练方法见 python llm/main.py -h")
 
     repo, filename = GGUF_MODELS[size]
     gguf = model_dir(repo) / filename

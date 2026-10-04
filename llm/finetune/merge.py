@@ -1,10 +1,10 @@
-"""第 4 步（可选）：把 LoRA 合并进底座模型，便于转成 GGUF 用 llama.cpp 高速运行。"""
+"""可选：把 LoRA 合并进底座模型，得到一个完整的新模型，便于分发或转成 GGUF 用 llama.cpp 高速运行。"""
 from __future__ import annotations
 
 from pathlib import Path
 
 from common import dtype_kwargs
-from config import OUTPUT_DIR
+from config import LORA_DIR, OUTPUT_DIR
 from serve.backends import adapter_base
 
 GGUF_GUIDE = """
@@ -18,7 +18,7 @@ GGUF_GUIDE = """
 """
 
 
-def merge_lora(adapter_dir: Path = OUTPUT_DIR / "lora", out_dir: Path = OUTPUT_DIR / "merged") -> Path:
+def merge_lora(adapter_dir: Path = LORA_DIR, out_dir: Path = OUTPUT_DIR / "merged") -> Path:
     import torch
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer

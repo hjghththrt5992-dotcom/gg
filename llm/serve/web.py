@@ -5,14 +5,14 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from kb_builder.chunker import chunk_header
+from serve.prompt import build_messages
 
 PAGE = """<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>知识库问答</title>
+<title>知识问答</title>
 <style>
   :root { --bg:#f7f7f5; --card:#fff; --text:#1f2328; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; }
   @media (prefers-color-scheme: dark) {
@@ -33,17 +33,11 @@ PAGE = """<!doctype html>
   .qa { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-top:16px; }
   .q { font-weight:600; margin-bottom:8px; }
   .a { white-space:pre-wrap; word-break:break-word; }
-  .a sup { color:var(--accent); font-weight:600; }
-  .src { margin-top:12px; border-top:1px dashed var(--line); padding-top:8px; font-size:14px; color:var(--muted); }
-  details { margin:4px 0; }
-  details.cited summary { color:var(--text); }
-  details p { white-space:pre-wrap; margin:6px 0 10px 16px; }
-  summary { cursor:pointer; }
 </style>
 </head>
 <body>
 <main>
-  <h1>知识库问答</h1>
+  <h1>知识问答</h1>
   <div class="sub" id="info">加载中…</div>
   <form id="f"><input id="q" placeholder="输入问题，例如：LoRA 为什么能省显存？" autocomplete="off" autofocus>
   <button id="b">提问</button></form>
@@ -53,7 +47,7 @@ PAGE = """<!doctype html>
 const $ = s => document.querySelector(s);
 const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 fetch("/api/info").then(r => r.json()).then(d => {
-  $("#info").textContent = `模型：${d.model} ｜ 知识库：${d.docs} 篇文档 / ${d.chunks} 块 ｜ 检索：${d.mode}`;
+  $("#info").textContent = `模型：${d.model}`;
 });
 $("#f").onsubmit = async e => {
   e.preventDefault();
@@ -62,17 +56,11 @@ $("#f").onsubmit = async e => {
   $("#b").disabled = true;
   const box = document.createElement("div");
   box.className = "qa";
-  box.innerHTML = `<div class="q">${esc(question)}</div><div class="a">检索中…</div><div class="src"></div>`;
+  box.innerHTML = `<div class="q">${esc(question)}</div><div class="a">思考中…</div>`;
   $("#list").prepend(box);
-  const a = box.querySelector(".a"), src = box.querySelector(".src");
-  let answer = "", sources = [];
-  const render = () => {
-    a.innerHTML = esc(answer).replace(/\\[(\\d+)\\]/g, "<sup>[$1]</sup>");
-    const cited = new Set([...answer.matchAll(/\\[(\\d+)\\]/g)].map(m => +m[1]));
-    src.innerHTML = "参考资料：" + sources.map(s =>
-      `<details class="${cited.has(s.n) ? "cited" : ""}"><summary>[${s.n}] ${esc(s.header)}` +
-      `${cited.has(s.n) ? " ✓" : ""}</summary><p>${esc(s.text)}</p></details>`).join("");
-  };
+  const a = box.querySelector(".a");
+  let answer = "";
+  const render = () => { a.textContent = answer; };
   try {
     const res = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"},
                                          body: JSON.stringify({question})});
@@ -85,8 +73,7 @@ $("#f").onsubmit = async e => {
       let i;
       while ((i = buf.indexOf("\\n")) >= 0) {
         const msg = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
-        if (msg.type === "sources") { sources = msg.data; a.textContent = "思考中…"; }
-        else if (msg.type === "token") { answer += msg.data; render(); }
+        if (msg.type === "token") { answer += msg.data; render(); }
         else if (msg.type === "error") { answer += "\\n[出错] " + msg.data; render(); }
       }
     }
@@ -103,7 +90,7 @@ $("#f").onsubmit = async e => {
 """
 
 
-def make_handler(rag, info: dict):
+def make_handler(backend, info: dict):
     lock = threading.Lock()  # 模型一次只处理一个问题
 
     class Handler(BaseHTTPRequestHandler):
@@ -145,11 +132,7 @@ def make_handler(rag, info: dict):
             self.end_headers()
             try:
                 with lock:
-                    contexts, stream = rag.ask(question)
-                    self._line({"type": "sources", "data": [
-                        {"n": i, "header": chunk_header(c), "doc": c["doc"], "text": c["text"]}
-                        for i, c in enumerate(contexts, 1)]})
-                    for piece in stream:
+                    for piece in backend.stream(build_messages(question)):
                         self._line({"type": "token", "data": piece})
                     self._line({"type": "done"})
             except (BrokenPipeError, ConnectionResetError):
@@ -163,15 +146,9 @@ def make_handler(rag, info: dict):
     return Handler
 
 
-def run_web(rag, host: str = "127.0.0.1", port: int = 8000) -> None:
-    r = rag.retriever
-    info = {
-        "model": f"{rag.backend.label}（{rag.backend.name}）",
-        "docs": len({c["doc"] for c in r.chunks}),
-        "chunks": len(r.chunks),
-        "mode": ("关键词+向量" if r.embedder else "仅关键词") + ("+重排" if r.reranker else ""),
-    }
-    server = ThreadingHTTPServer((host, port), make_handler(rag, info))
+def run_web(backend, host: str = "127.0.0.1", port: int = 8000) -> None:
+    info = {"model": f"{backend.label}（{backend.name}）"}
+    server = ThreadingHTTPServer((host, port), make_handler(backend, info))
     print(f"[网页] 打开浏览器访问 http://{host}:{port}  （按 Ctrl+C 停止）")
     try:
         server.serve_forever()

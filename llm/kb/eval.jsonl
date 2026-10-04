@@ -57,19 +57,7 @@
 {"question": "Windows 电脑上怎么查看显卡有多少显存？", "doc": "12_硬件与训练成本.md", "keywords": ["任务管理器|dxdiag"]}
 {"question": "在 CPU 上用 32 位精度微调 0.5B 模型大约需要多少内存？", "doc": "12_硬件与训练成本.md", "keywords": ["6GB|6 GB|4～6|4-6"]}
 {"question": "CPU 训练到一半断电了怎么办？", "doc": ["12_硬件与训练成本.md", "13_本项目使用手册.md"], "keywords": ["resume"]}
-{"question": "怎样把自己的文档加进知识库？", "doc": "13_本项目使用手册.md", "keywords": ["docs", "build"]}
+{"question": "怎样用自己的文档训练模型？", "doc": "13_本项目使用手册.md", "keywords": ["docs", "build"]}
 {"question": "在国内下载不了模型怎么办？", "doc": "13_本项目使用手册.md", "keywords": ["hf-mirror|镜像"]}
 {"question": "问答速度太慢有什么解决办法？", "doc": "13_本项目使用手册.md", "keywords": ["0.5b|0.5B|gguf|GGUF|llama-cpp|量化"]}
-{"question": "程序生成的索引、模型等文件保存在哪里？", "doc": "13_本项目使用手册.md", "keywords": ["data"]}
-{"question": "今天北京的天气怎么样？", "doc": null}
-{"question": "红烧肉怎么做才好吃？", "doc": null}
-{"question": "2024 年巴黎奥运会中国队获得了多少枚金牌？", "doc": null}
-{"question": "怎样办理护照？", "doc": null}
-{"question": "猫为什么喜欢晒太阳？", "doc": null}
-{"question": "明天股市会涨吗？", "doc": null}
-{"question": "李白一共写了多少首诗？", "doc": null}
-{"question": "感冒发烧应该吃什么药？", "doc": null}
-{"question": "GPT-4 有多少参数？", "doc": null}
-{"question": "深圳到广州的高铁票多少钱？", "doc": null}
-{"question": "Stable Diffusion 是怎样生成图片的？", "doc": null}
-{"question": "Python 编程语言是谁发明的？", "doc": null}
+{"question": "程序生成的训练数据、模型等文件保存在哪里？", "doc": "13_本项目使用手册.md", "keywords": ["data"]}

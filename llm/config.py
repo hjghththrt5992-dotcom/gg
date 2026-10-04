@@ -1,40 +1,42 @@
-"""全局配置：路径、模型名称、检索与生成参数。"""
+"""全局配置：路径、模型名称、训练参数。"""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-KB_DOCS = ROOT / "kb" / "docs"          # 知识库原始文档（自带示例，可替换成你自己的）
-KB_EVAL = ROOT / "kb" / "eval.jsonl"    # 自带评测集
-DATA = ROOT / "data"                    # 所有生成的文件（索引、模型、训练输出），不进 git
-INDEX_DIR = DATA / "index"
+KB_DOCS = ROOT / "kb" / "docs"          # 知识库原始文档：模型要学会的知识（自带示例，可替换成你自己的）
+KB_EVAL = ROOT / "kb" / "eval.jsonl"    # 自带评测题
+DATA = ROOT / "data"                    # 所有生成的文件（训练数据、模型、训练输出），不进 git
+CORPUS_DIR = DATA / "corpus"            # 由知识库生成的训练数据
+PASSAGES = CORPUS_DIR / "passages.jsonl"
+REWRITES = CORPUS_DIR / "rewrites.jsonl"
+QA = CORPUS_DIR / "qa.jsonl"
+TRAIN_FILE = CORPUS_DIR / "train.jsonl"
+EVAL_AUTO = CORPUS_DIR / "eval_auto.jsonl"
 MODELS_DIR = DATA / "models"
 OUTPUT_DIR = DATA / "output"
+LORA_DIR = OUTPUT_DIR / "lora"
 SETTINGS_FILE = DATA / "settings.json"
 
-# ---- 模型 ----
-EMBED_MODEL = "BAAI/bge-small-zh-v1.5"      # 向量模型，约 95MB
-RERANK_MODEL = "BAAI/bge-reranker-base"     # 重排模型（可选），约 1.1GB
+# ---- 底座模型 ----
 LLM_MODELS = {
     "0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
     "1.5b": "Qwen/Qwen2.5-1.5B-Instruct",
 }
-GGUF_MODELS = {  # llama.cpp 用的 4bit 量化版本（可选，推理更快更省内存）
+GGUF_MODELS = {  # llama.cpp 用的 4bit 量化版本（可选）：生成训练数据时速度快 2~4 倍
     "0.5b": ("Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_k_m.gguf"),
     "1.5b": ("Qwen/Qwen2.5-1.5B-Instruct-GGUF", "qwen2.5-1.5b-instruct-q4_k_m.gguf"),
 }
-BGE_QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 
 # ---- 切分 ----
-CHUNK_SIZE = 400        # 每块最多字符数
-CHUNK_OVERLAP = 60      # 相邻块重叠字符数
+CHUNK_SIZE = 400        # 每段最多字符数
+CHUNK_OVERLAP = 60      # 相邻段重叠字符数
 
-# ---- 检索 ----
-CANDIDATES = 20         # 每路检索召回数量
-TOP_K = 4               # 最终送给模型的资料段数
-RRF_K = 60              # RRF 融合常数
-MAX_CONTEXT_CHARS = 1800  # 送给模型的资料总字数上限（小模型少而精效果更好）
+# ---- 训练 ----
+LORA_RANK = 64          # 注入知识需要较大的秩；只调整回答风格时 8~16 就够
+EPOCHS = 3              # 知识要多看几遍才记得住
+LEARNING_RATE = 2e-4
 
 # ---- 生成 ----
 MAX_NEW_TOKENS = 512
@@ -62,4 +64,4 @@ def save_settings(**kwargs) -> None:
 
 def default_size() -> str:
     """默认使用的模型大小：优先用 check 命令保存的推荐值。"""
-    return load_settings().get("size", "1.5b")
+    return load_settings().get("size", "0.5b")

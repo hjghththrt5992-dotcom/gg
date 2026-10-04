@@ -1,8 +1,8 @@
-"""把文档切成适合检索的小块。
+"""把文档切成适合训练的段落。
 
 规则：按 Markdown 标题分节 → 节内按段落和句子装箱，每块不超过 CHUNK_SIZE 字；
 同一节内相邻块重叠 CHUNK_OVERLAP 字；很短的小节会和后面的小节合并，避免碎块。
-每块都记录"文档标题 + 小节路径"，检索和生成时一起使用，防止断章取义。
+每段都记录"文档标题 + 小节路径"，训练时和正文一起使用，让模型把知识和主题对应起来。
 """
 from __future__ import annotations
 
@@ -114,5 +114,6 @@ def chunk_header(chunk: dict) -> str:
     return header
 
 
-def embed_text(chunk: dict) -> str:
+def passage_text(chunk: dict) -> str:
+    """带标题的段落全文，用作训练文本。"""
     return f"{chunk_header(chunk)}\n{chunk['text']}"

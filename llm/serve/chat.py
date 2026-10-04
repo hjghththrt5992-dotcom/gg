@@ -1,27 +1,13 @@
 """命令行对话。"""
 from __future__ import annotations
 
-import re
 import time
 
-from kb_builder.chunker import chunk_header
+from serve.prompt import build_messages
 
 
-def cited_numbers(answer: str) -> set[int]:
-    return {int(n) for n in re.findall(r"\[(\d+)\]", answer)}
-
-
-def format_sources(contexts: list[dict], answer: str) -> str:
-    cited = cited_numbers(answer)
-    lines = []
-    for i, c in enumerate(contexts, 1):
-        mark = "*" if i in cited else " "
-        lines.append(f"  {mark}[{i}] {chunk_header(c)}  ({c['doc']})")
-    return "\n".join(lines)
-
-
-def run_chat(rag) -> None:
-    print(f"[模型] {rag.backend.label}（{rag.backend.name}）")
+def run_chat(backend) -> None:
+    print(f"[模型] {backend.label}（{backend.name}）")
     print("输入问题开始提问，输入 /q 退出。\n")
     while True:
         try:
@@ -34,12 +20,7 @@ def run_chat(rag) -> None:
         if question in {"/q", "/quit", "exit", "quit", "退出"}:
             break
         t0 = time.time()
-        contexts, stream = rag.ask(question)
         print("助手：", end="", flush=True)
-        parts = []
-        for piece in stream:
-            parts.append(piece)
+        for piece in backend.stream(build_messages(question)):
             print(piece, end="", flush=True)
-        answer = "".join(parts)
-        print(f"\n\n参考资料（* 为答案引用）  用时 {time.time() - t0:.1f} 秒")
-        print(format_sources(contexts, answer) + "\n")
+        print(f"\n（用时 {time.time() - t0:.1f} 秒）\n")

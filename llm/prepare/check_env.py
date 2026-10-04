@@ -1,4 +1,4 @@
-"""检测电脑配置，测一下算力，推荐合适的模型大小并估算训练时间。"""
+"""检测电脑配置，测一下算力，推荐合适的底座模型大小并估算训练时间。"""
 from __future__ import annotations
 
 import os
@@ -11,11 +11,16 @@ import time
 from common import physical_cores, pick_device
 from config import save_settings
 
-# LoRA 微调每个 token 的计算量（GFLOP）≈ 非嵌入参数量 × 6（前向 2 + 反向 2 + 梯度检查点重算 2），
-# 再按实测校准：4 核 CPU 测速 470~580 GFLOPS，0.5B 实测 150 token/秒，1.5B 实测 44 token/秒
-TRAIN_GFLOP_PER_TOKEN = {"0.5b": 2.15, "1.5b": 7.0}
-TOKENS_PER_1000_SAMPLES = 1.1e6
+# LoRA 训练每个 token 的计算量（GFLOP）≈ 非嵌入参数量 × 6（前向 2 + 反向 2 + 梯度检查点重算 2），
+# 整段文字样本还要对每个位置算词表输出层，约再加 0.5~1 GFLOP。
+# 按实测校准：4 核 CPU 测速 470~580 GFLOPS 时，问答样本 0.5B 约 150 token/秒，1.5B 约 44 token/秒
+TRAIN_GFLOP_PER_TOKEN = {"0.5b": 2.6, "1.5b": 7.8}
 TRAIN_EFFICIENCY = 0.55  # 训练时的有效算力约为下面矩阵乘法测速结果的 55%（略偏保守）
+
+
+def estimate_hours(tokens: float, size: str, gflops: float) -> float:
+    """训练 tokens 个词元大约需要多少小时。"""
+    return tokens * TRAIN_GFLOP_PER_TOKEN[size] / (gflops * TRAIN_EFFICIENCY) / 3600
 
 
 def cpu_name() -> str:
@@ -117,22 +122,19 @@ def check() -> dict:
     gflops = benchmark_gflops()
     print(f"  矩阵运算速度约 {gflops:.0f} GFLOPS")
 
-    hours = {s: TOKENS_PER_1000_SAMPLES * g / (gflops * TRAIN_EFFICIENCY) / 3600
-             for s, g in TRAIN_GFLOP_PER_TOKEN.items()}
+    hours = {s: estimate_hours(1e6, s, gflops) for s in TRAIN_GFLOP_PER_TOKEN}
     has_gpu = bool(gpu) and "未启用" not in gpu[0]
-    size = "1.5b" if (has_gpu and gpu[1] >= 4) or ram >= 12 else "0.5b"
-    # 1.5B 微调需要约 12GB 内存（或 8GB 显存），并且一晚上（8 小时内）能训练完才推荐
+    # 1.5B 训练需要约 12GB 内存（或 8GB 显存），并且 100 万词元能在一晚上（8 小时）内训练完才推荐
     big_enough = (has_gpu and gpu[1] >= 8) or (not has_gpu and ram >= 14)
-    train_size = "1.5b" if big_enough and hours["1.5b"] <= 8 else "0.5b"
+    size = "1.5b" if big_enough and hours["1.5b"] <= 8 else "0.5b"
 
     print("\n==== 推荐 ====")
-    print(f"  问答模型：Qwen2.5-{size.upper()}-Instruct")
-    print(f"  微调模型：Qwen2.5-{train_size.upper()}-Instruct")
-    print("  预估 LoRA 微调耗时（每 1000 条训练样本，1 轮）：")
+    print(f"  底座模型：Qwen2.5-{size.upper()}-Instruct")
+    print("  预估训练耗时（每 100 万词元，约相当于 10 万字的知识库训练 3 轮）：")
     for s, h in hours.items():
-        print(f"    {s.upper()}：约 {h:.1f} 小时" + ("  ← 推荐" if s == train_size else ""))
+        print(f"    {s.upper()}：约 {h:.1f} 小时" + ("  ← 推荐" if s == size else ""))
     if ram < 8:
-        print("  [!] 内存小于 8GB，建议安装 llama-cpp-python 并使用 GGUF 量化模型（download --gguf）")
-    save_settings(size=size, train_size=train_size)
+        print("  [!] 内存小于 8GB，只能训练 0.5B；建议安装 llama-cpp-python 并运行 download --gguf 加快生成训练数据")
+    save_settings(size=size, gflops=round(gflops))
     print("\n已保存推荐设置，之后的命令默认使用上述模型。")
-    return {"size": size, "train_size": train_size, "gflops": gflops}
+    return {"size": size, "gflops": gflops}

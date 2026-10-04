@@ -1,13 +1,10 @@
-"""评测：用数字衡量"效果好不好"。
+"""评测：不给任何资料，直接提问，看模型有没有学会知识库里的内容（闭卷考试）。
 
-评测集每行一个 JSON：
-  可回答：{"question": "...", "doc": "应命中的文档文件名（多个时用列表）", "keywords": ["必须出现的词", "同义词A|同义词B"]}
-  不可回答（知识库里没有）：{"question": "...", "doc": null}
-指标：
-  检索命中率 Hit@1 / Hit@K、MRR —— 正确文档是否被检索到
-  回答正确率 —— 关键词全部出现；没有 keywords 时，参考答案 answer 与回答的二元组重合率 ≥ 0.5
-  引用正确率 —— 答案引用的编号中，是否有来自正确文档的资料
-  拒答正确率 —— 知识库外的问题，是否回答"未找到"；以及可回答问题被错误拒答的比例
+评测题每行一个 JSON，两种判分方式：
+  {"question": "...", "keywords": ["必须出现的词", "同义词A|同义词B"]}   关键词全部出现算对
+  {"question": "...", "answer": "参考答案"}                             参考答案的二元组有一半以上出现在回答里算对
+自带评测题 kb/eval.jsonl 针对示例知识库；build-train 还会从生成的问答里留出一部分作为自动评测题。
+建议训练前后各测一次：eval --base 测原版底座模型，eval 测训练后的模型。
 """
 from __future__ import annotations
 
@@ -16,10 +13,9 @@ import time
 from pathlib import Path
 
 from common import read_jsonl
-from config import CANDIDATES, KB_EVAL, OUTPUT_DIR, TOP_K
-from finetune.gen_qa import grounding
-from serve.chat import cited_numbers
-from serve.prompt import is_refusal
+from config import OUTPUT_DIR
+from finetune.synth import grounding
+from serve.prompt import build_messages
 
 
 def keywords_hit(answer: str, keywords: list[str]) -> bool:
@@ -27,89 +23,32 @@ def keywords_hit(answer: str, keywords: list[str]) -> bool:
     return all(any(alt.strip().lower() in text for alt in group.split("|")) for group in keywords)
 
 
-def expected_docs(item: dict) -> set[str]:
-    doc = item.get("doc")
-    return set(doc) if isinstance(doc, list) else {doc}
+def judge(item: dict, answer: str) -> bool:
+    if item.get("keywords"):
+        return keywords_hit(answer, item["keywords"])
+    return grounding(item.get("answer", ""), answer) >= 0.5
 
 
-def _pct(num: int, den: int) -> str:
-    return f"{100 * num / den:.1f}%（{num}/{den}）" if den else "-"
-
-
-def evaluate(retriever, rag=None, eval_path: Path = KB_EVAL, tag: str = "base", limit: int | None = None) -> dict:
-    items = read_jsonl(eval_path)
-    answerable = [x for x in items if x.get("doc")]
-    unanswerable = [x for x in items if not x.get("doc")]
-    if limit:  # 抽查时两类题按比例都保留
-        answerable = answerable[:limit]
-        unanswerable = unanswerable[:max(1, limit // 5)]
-    items = answerable + unanswerable
-
-    # ---- 检索 ----
-    hit1 = hitk = 0
-    mrr = 0.0
-    for x in answerable:
-        hits = retriever.search(x["question"], top_k=CANDIDATES)
-        ranks = [i for i, h in enumerate(hits) if h["doc"] in expected_docs(x)]
-        rank = ranks[0] if ranks else None
-        hit1 += rank == 0
-        hitk += rank is not None and rank < TOP_K
-        mrr += 1 / (rank + 1) if rank is not None else 0
-    report = {
-        "tag": tag,
-        "retrieval": {"hit@1": hit1 / max(1, len(answerable)), f"hit@{TOP_K}": hitk / max(1, len(answerable)),
-                      "mrr": mrr / max(1, len(answerable))},
-    }
-    print(f"\n==== 检索（{len(answerable)} 题）====")
-    print(f"  Hit@1     {_pct(hit1, len(answerable))}")
-    print(f"  Hit@{TOP_K}     {_pct(hitk, len(answerable))}")
-    print(f"  MRR       {report['retrieval']['mrr']:.3f}")
-
-    if rag is None:
-        return report
-
-    # ---- 生成 ----
-    correct = cite_ok = false_refuse = refuse_ok = 0
-    details = []
-    t0 = time.time()
-    for k, x in enumerate(items, 1):
-        contexts, answer = rag.answer(x["question"])
-        refused = is_refusal(answer)
-        row = {"question": x["question"], "answer": answer, "doc": x.get("doc"), "refused": refused}
-        if x.get("doc"):
-            if x.get("keywords"):
-                ok = keywords_hit(answer, x["keywords"])
-            else:
-                ok = grounding(x.get("answer", ""), answer) >= 0.5
-            cited_docs = {contexts[n - 1]["doc"] for n in cited_numbers(answer) if 0 < n <= len(contexts)}
-            row.update(correct=ok and not refused, cited_ok=bool(expected_docs(x) & cited_docs))
-            correct += row["correct"]
-            cite_ok += row["cited_ok"]
-            false_refuse += refused
-        else:
-            row["correct"] = refused
-            refuse_ok += refused
-        details.append(row)
-        print(f"\r  生成中 {k}/{len(items)}", end="", flush=True)
+def evaluate(backend, eval_path: Path, tag: str, limit: int | None = None) -> dict:
+    items = read_jsonl(eval_path)[:limit] if limit else read_jsonl(eval_path)
+    if not items:
+        raise SystemExit(f"{eval_path} 中没有评测题")
+    correct, details, t0 = 0, [], time.time()
+    for k, item in enumerate(items, 1):
+        answer = "".join(backend.stream(build_messages(item["question"]))).strip()
+        ok = judge(item, answer)
+        correct += ok
+        details.append({"question": item["question"], "answer": answer, "correct": ok,
+                        "reference": item.get("answer") or item.get("keywords")})
+        print(f"\r  [{eval_path.name}] {k}/{len(items)}，答对 {correct}", end="", flush=True)
     elapsed = time.time() - t0
-
-    report["generation"] = {
-        "accuracy": correct / max(1, len(answerable)),
-        "citation": cite_ok / max(1, len(answerable)),
-        "false_refusal": false_refuse / max(1, len(answerable)),
-        "refusal": refuse_ok / max(1, len(unanswerable)),
-        "seconds_per_question": elapsed / max(1, len(items)),
-    }
-    report["details"] = details
-    print(f"\n==== 回答（模型：{rag.backend.label}）====")
-    print(f"  回答正确率     {_pct(correct, len(answerable))}")
-    print(f"  引用正确率     {_pct(cite_ok, len(answerable))}")
-    print(f"  错误拒答率     {_pct(false_refuse, len(answerable))}  （越低越好）")
-    print(f"  拒答正确率     {_pct(refuse_ok, len(unanswerable))}  （知识库外的问题）")
-    print(f"  平均每题用时   {report['generation']['seconds_per_question']:.1f} 秒")
-
+    report = {"tag": tag, "file": str(eval_path), "model": backend.label, "accuracy": correct / len(items),
+              "correct": correct, "total": len(items), "seconds_per_question": elapsed / len(items),
+              "details": details}
+    print(f"\n  正确率 {100 * correct / len(items):.1f}%（{correct}/{len(items)}），"
+          f"平均每题 {elapsed / len(items):.1f} 秒")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUTPUT_DIR / f"eval_{tag}.json"
+    out = OUTPUT_DIR / f"eval_{tag}_{eval_path.stem}.json"
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"  详细结果：{out}")
+    print(f"  每道题的回答：{out}")
     return report

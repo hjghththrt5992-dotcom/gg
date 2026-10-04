@@ -1,8 +1,8 @@
-"""第 3 步：LoRA 微调。只训练约 0.5% 的参数，CPU 也能跑；有 NVIDIA 显卡会自动使用。
+"""第 4 步：LoRA 训练，把知识写进模型。只训练约 2%～4% 的参数，CPU 也能跑；有 NVIDIA 显卡会自动使用。
 
 为了在老电脑上省内存、省时间：
 - batch=1 + 梯度累积，不需要 padding；
-- 只对答案部分计算 lm_head（logits_to_keep），省掉约 90% 的词表计算和几百 MB 内存；
+- 问答样本只对回答部分计算 lm_head（logits_to_keep），省掉大部分词表计算和几百 MB 内存；
 - 梯度检查点（gradient checkpointing）；
 - 定期保存断点，中途关机可以用 --resume 接着训练。
 """
@@ -15,13 +15,17 @@ import time
 from pathlib import Path
 
 from common import dtype_kwargs, pick_device, portable_path, read_jsonl, render_chat
-from config import OUTPUT_DIR
+from config import EPOCHS, LEARNING_RATE, LORA_DIR, LORA_RANK, TRAIN_FILE
 
 LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 
-def encode_sample(tokenizer, messages: list[dict], max_len: int):
-    """返回 (input_ids, 答案起始位置)。只有答案部分参与计算损失。"""
+def encode_sample(tokenizer, sample: dict, max_len: int):
+    """返回 (input_ids, 计算损失的起始位置)。整段文字从第 2 个词元起都算损失；对话只算回答部分。"""
+    if "text" in sample:
+        ids = tokenizer(sample["text"], add_special_tokens=False)["input_ids"] + [tokenizer.eos_token_id]
+        return (ids[:max_len], 1) if len(ids) > 1 else None
+    messages = sample["messages"]
     prompt = render_chat(tokenizer, messages[:-1], add_generation_prompt=True)
     full = render_chat(tokenizer, messages, add_generation_prompt=False)
     if not full.startswith(prompt):
@@ -34,9 +38,9 @@ def encode_sample(tokenizer, messages: list[dict], max_len: int):
     return ids, len(prompt_ids)
 
 
-def train_lora(base_model: Path, data_path: Path = OUTPUT_DIR / "train.jsonl", out_dir: Path = OUTPUT_DIR / "lora",
-               epochs: float = 1.0, lr: float = 2e-4, rank: int = 16, grad_accum: int = 8, max_len: int = 2048,
-               max_samples: int | None = None, save_every: int = 20, resume: bool = False, seed: int = 42) -> Path:
+def train_lora(base_model: Path, data_path: Path = TRAIN_FILE, out_dir: Path = LORA_DIR, epochs: float = EPOCHS,
+               lr: float = LEARNING_RATE, rank: int = LORA_RANK, grad_accum: int = 8, max_len: int = 1024,
+               max_samples: int | None = None, save_every: int = 50, resume: bool = False, seed: int = 42) -> Path:
     import torch
     from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -49,7 +53,7 @@ def train_lora(base_model: Path, data_path: Path = OUTPUT_DIR / "train.jsonl", o
     random.Random(seed).shuffle(samples)
     if max_samples:
         samples = samples[:max_samples]
-    encoded = [e for e in (encode_sample(tokenizer, s["messages"], max_len) for s in samples) if e]
+    encoded = [e for e in (encode_sample(tokenizer, s, max_len) for s in samples) if e]
     if not encoded:
         raise SystemExit("没有可用的训练样本")
     n_tokens = sum(len(ids) for ids, _ in encoded)
@@ -111,11 +115,11 @@ def train_lora(base_model: Path, data_path: Path = OUTPUT_DIR / "train.jsonl", o
 
     t0, seen_tokens, running = time.time(), 0, None
     for micro in range(step * grad_accum, len(order)):
-        ids, answer_start = encoded[order[micro]]
+        ids, loss_start = encoded[order[micro]]
         input_ids = torch.tensor([ids], device=device)
-        keep = len(ids) - answer_start + 1  # 预测答案需要的最后 keep 个位置的 logits
+        keep = len(ids) - loss_start + 1  # 计算损失只需要最后 keep 个位置的 logits
         logits = model(input_ids=input_ids, logits_to_keep=keep).logits[:, :-1].float()
-        targets = input_ids[:, answer_start:]
+        targets = input_ids[:, loss_start:]
         loss = torch.nn.functional.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
         (loss / grad_accum).backward()
         seen_tokens += len(ids)

@@ -4,10 +4,8 @@ transformers>=4.51
 peft>=0.13
 accelerate>=0.34
 huggingface_hub>=0.25
-numpy
-jieba
 psutil
 # 可选：读取 PDF
 pypdf
-# 可选：GGUF 量化推理（速度快 2~4 倍）。Windows 安装失败可跳过，程序会自动改用 transformers
+# 可选：GGUF 量化推理，生成训练数据速度快 2~4 倍。Windows 安装失败可跳过，程序会自动改用 transformers
 # llama-cpp-python

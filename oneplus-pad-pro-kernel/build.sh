@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ------------------------------------------------------------------ 参数
 ANDROID_VER="${ANDROID_VER:-16}"            # 平板当前系统的安卓大版本：14 / 15 / 16
-KSU="${KSU:-true}"                           # 集成 KernelSU（官方 tiann/KernelSU）
+KSU="${KSU:-true}"                           # 集成 KernelSU（官方 tiann/KernelSU）；false = 通用内核，可配合 APatch / Magisk
 KSU_REF="${KSU_REF:-main}"                   # KernelSU 分支 / tag / commit
 SUSFS="${SUSFS:-true}"                       # 集成 SUSFS 隐藏 root（需要 KSU=true）
 SUSFS_REF="${SUSFS_REF:-gki-android14-6.1}"  # SUSFS 分支 / commit
@@ -27,7 +27,10 @@ OPT="${OPT:-true}"                            # 一组社区调优补丁（内�
 O3="${O3:-false}"                             # 用 -O3 而不是 -O2 编译（更激进，体积更大，未必更快）
 NTSYNC="${NTSYNC:-false}"                     # NTSync 同步原语（跑 Wine/游戏兼容层时有用）
 TMPFS_XATTR="${TMPFS_XATTR:-true}"            # tmpfs 的 xattr / POSIX ACL（部分模块和容器需要）
+CONTAINERS="${CONTAINERS:-true}"              # 容器 / Linux 桌面支持（Droidspaces、LXC、Docker）：PID/IPC/USER 命名空间、SYSVIPC 等
+ABI_CHECK="${ABI_CHECK:-true}"                # 额外编一个官方配置的基线，核对 KMI 符号 CRC，不一致就不出包
 LTO="${LTO:-thin}"                           # none / thin / full（full 最慢，体积最小）
+PGO="${PGO:-true}"                            # 用一加源码自带的真机性能数据（pgo-profiles/）指导编译优化
 PATCHES_REF="${PATCHES_REF:-41ae18b35d20e0c6ac04116785a4a1089528ae94}"  # WildKernels/kernel_patches 固定 commit
 LOCALVERSION_STR="${LOCALVERSION_STR:--android14-11}"  # uname -r 中 6.1.x 之后的后缀
 KERNEL_NAME="${KERNEL_NAME:-OPPadPro-GKI}"   # 刷包文件名前缀
@@ -56,7 +59,10 @@ PATCHES_REPO=https://github.com/WildKernels/kernel_patches.git
 log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31m[错误] %s\033[0m\n' "$*" >&2; exit 1; }
 
-[ "$SUSFS" = true ] && [ "$KSU" != true ] && die "SUSFS 依赖 KernelSU，请同时开启 KSU=true"
+if [ "$KSU" != true ] && [ "$SUSFS" = true ]; then
+  echo "KSU=false：编译通用内核，SUSFS 依赖 KernelSU，已自动关闭"
+  SUSFS=false
+fi
 for tool in git curl python3 make bc bison flex zip pahole; do
   command -v "$tool" >/dev/null || die "缺少 $tool，Ubuntu 可执行：sudo apt install git curl python3 make bc bison flex zip dwarves libssl-dev libelf-dev cpio"
 done
@@ -158,6 +164,43 @@ fi
 export PATH="$CLANG_DIR:$PATH"
 clang --version | head -n1
 
+export KBUILD_BUILD_USER="$BUILD_USER" KBUILD_BUILD_HOST="$BUILD_HOST"
+MAKE_BASE=(-C "$KDIR" ARCH=arm64 LLVM=1 LLVM_IAS=1 LOCALVERSION=)
+if command -v ccache >/dev/null; then
+  MAKE_BASE+=(CC="ccache clang" HOSTCC="ccache clang")
+fi
+set_lto() {  # $1=.config 路径
+  local c=("$KDIR/scripts/config" --file "$1")
+  case "$LTO" in
+    none) "${c[@]}" -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL ;;
+    thin) "${c[@]}" -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL ;;
+    full) "${c[@]}" -d LTO_NONE -d LTO_CLANG_THIN -e LTO_CLANG_FULL ;;
+    *) die "LTO 只能是 none / thin / full" ;;
+  esac
+}
+
+# ------------------------------------------------------------------ 3.5 ABI 基线
+# 厂商模块只认官方内核导出的 KMI 符号及其 CRC。这里用「官方源码 + 官方配置」编一个基线，
+# 编完正式内核后逐个比对 KMI 符号的 CRC（见 abi_check.py）。基线按源码 commit 缓存，只编一次。
+BASE_SYMVERS=""
+if [ "$ABI_CHECK" = true ]; then
+  CC_ID="$(clang --version | head -n1 | md5sum | cut -c1-8)"   # 换编译器就重编基线
+  BASE_SYMVERS="$WORK_DIR/abi-baseline-a$ANDROID_VER-$(git -C "$KDIR" rev-parse --short=12 HEAD)-lto-$LTO-cc-$CC_ID.symvers"
+  if [ -s "$BASE_SYMVERS" ]; then
+    log "复用 ABI 基线 $(basename "$BASE_SYMVERS")"
+  else
+    log "编译 ABI 基线（官方源码 + 官方配置，只用来核对符号 CRC）"
+    BOUT="$WORK_DIR/a$ANDROID_VER/out-baseline"
+    rm -rf "$BOUT"
+    make "${MAKE_BASE[@]}" O="$BOUT" gki_defconfig
+    set_lto "$BOUT/.config"
+    make "${MAKE_BASE[@]}" O="$BOUT" olddefconfig
+    make "${MAKE_BASE[@]}" O="$BOUT" -j"$JOBS" vmlinux
+    cp "$BOUT/vmlinux.symvers" "$BASE_SYMVERS"
+    rm -rf "$BOUT"
+  fi
+fi
+
 # ------------------------------------------------------------------ 4. KernelSU
 if [ "$KSU" = true ]; then
   log "集成 KernelSU ($KSU_REF)"
@@ -201,8 +244,8 @@ apply_patch() {  # $1=补丁相对路径  返回 0=成功 1=跳过
   echo "  跳过（冲突，可能与官方源码版本不符）: $rel"; return 1
 }
 
-OPT_APPLIED=0 BBR3_OK=false NTSYNC_OK=false
-if [ "$OPT" = true ] || [ "$BBR3" = true ] || [ "$NTSYNC" = true ]; then
+OPT_APPLIED=0 BBR3_OK=false NTSYNC_OK=false CONTAINERS_OK=false
+if [ "$OPT" = true ] || [ "$BBR3" = true ] || [ "$NTSYNC" = true ] || [ "$CONTAINERS" = true ]; then
   log "拉取社区补丁 (kernel_patches @ ${PATCHES_REF:0:12})"
   PATCHES_DIR="$WORK_DIR/kernel_patches"
   rm -rf "$PATCHES_DIR"
@@ -255,6 +298,25 @@ if [ "$NTSYNC" = true ]; then
   fi
 fi
 
+if [ "$CONTAINERS" = true ]; then
+  log "应用容器支持补丁"
+  # 三个补丁缺一不可，任何一个打不上就整体放弃容器支持，绝不半开：
+  #  - fix_sysvipc_kabi：SYSVIPC 会往 task_struct 加字段，这里改放进 Google 预留的 KABI 空位，保持接口不变
+  #  - ghost-task：开了 PID 命名空间后，一加 oplus_bsp_midas 模块查不到进程会解空指针导致死机，
+  #    只对这个模块返回一个占位进程
+  #  - Guard-USER_NS：只允许 root 创建用户命名空间，普通应用拿不到，避免扩大攻击面
+  if apply_patch common/droidspaces/fix_sysvipc_kabi_6_7_8.patch &&
+     apply_patch common/droidspaces/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.patch &&
+     apply_patch common/droidspaces/0001-Guard-USER_NS-for-non-root-users.patch; then
+    CONTAINERS_OK=true
+    if [ "$SUSFS" = true ]; then
+      echo "  注意：同时带 SUSFS 时，需在 SuSFS4KSU 设置里关闭「HIDE SUS MOUNTS FOR ALL PROCESSES」，否则容器起不来"
+    fi
+  else
+    die "容器支持补丁打不上（一加源码版本可能已变化），请关闭 CONTAINERS 或更新 PATCHES_REF"
+  fi
+fi
+
 # ------------------------------------------------------------------ 6. 内核配置
 # 自编译的内核签名密钥与官方不同，system_dlkm 里的 GKI 模块会被当作厂商模块加载；
 # 保留受保护符号列表会导致 WiFi 等模块加载失败，必须删除（SUSFS 文档第 11 条）
@@ -262,11 +324,7 @@ rm -f "$KDIR"/android/abi_gki_protected_exports_*
 # 去掉 uname 里的 git 哈希 / -dirty
 sed -i 's/scm_version="$(scm_version --short)"/scm_version=""/' "$KDIR/scripts/setlocalversion"
 
-export KBUILD_BUILD_USER="$BUILD_USER" KBUILD_BUILD_HOST="$BUILD_HOST"
-MAKE_ARGS=(-C "$KDIR" O="$KOUT" ARCH=arm64 LLVM=1 LLVM_IAS=1 LOCALVERSION=)
-if command -v ccache >/dev/null; then
-  MAKE_ARGS+=(CC="ccache clang" HOSTCC="ccache clang")
-fi
+MAKE_ARGS=("${MAKE_BASE[@]}" O="$KOUT")
 
 log "生成配置 (gki_defconfig)"
 rm -rf "$KOUT"
@@ -274,13 +332,9 @@ make "${MAKE_ARGS[@]}" gki_defconfig
 cfg() { "$KDIR/scripts/config" --file "$KOUT/.config" "$@"; }
 
 cfg --set-str LOCALVERSION "$LOCALVERSION_STR" -d LOCALVERSION_AUTO
-case "$LTO" in
-  none) cfg -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL ;;
-  thin) cfg -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL ;;
-  full) cfg -d LTO_NONE -d LTO_CLANG_THIN -e LTO_CLANG_FULL ;;
-  *) die "LTO 只能是 none / thin / full" ;;
-esac
-REQUIRED=()
+set_lto "$KOUT/.config"
+# KALLSYMS / KALLSYMS_ALL：KernelSU 和 APatch 都要靠它找内核符号（官方 GKI 本来就开着，这里确保不丢）
+REQUIRED=(KALLSYMS KALLSYMS_ALL)
 if [ "$KSU" = true ]; then cfg -e KSU; REQUIRED+=(KSU); fi
 if [ "$SUSFS" = true ]; then cfg -e KSU_SUSFS; REQUIRED+=(KSU_SUSFS); fi
 if [ "$BBR" = true ]; then
@@ -318,8 +372,39 @@ if [ "$NTSYNC_OK" = true ]; then
   cfg -e NTSYNC
   REQUIRED+=(NTSYNC)
 fi
+if [ "$CONTAINERS_OK" = true ]; then
+  # 容器需要的命名空间与 IPC；IPC_NS 依赖 SYSVIPC/POSIX_MQUEUE，默认随之打开。
+  # 网络（veth、bridge、NAT）、cgroup v2、overlayfs、seccomp 官方配置里已经有了。
+  # 不开 CGROUP_PIDS / CGROUP_DEVICE / BRIDGE_NETFILTER / IP_VS：实测打开后 2880 个 KMI 符号 CRC 改变
+  # （cgroup 子系统数组变大、skb 扩展编号整体后移、struct net 多出字段），厂商模块会全部加载失败。
+  # Docker 在 cgroup v2 下用 BPF 管设备（CGROUP_BPF 已有），缺 BRIDGE_NETFILTER 只是告警，桥接网络仍可用。
+  # 防火墙规则（UFW / Fail2ban）：REJECT 在 6.1 里由 IP_NF_TARGET_REJECT / IP6_NF_TARGET_REJECT 提供，官方已开；
+  # Droidspaces 清单里的 NETFILTER_XT_TARGET_REJECT 在 6.1 中不存在，不用设。
+  cfg -e SYSVIPC -e POSIX_MQUEUE -e IPC_NS -e PID_NS -e USER_NS -e DEVTMPFS \
+      -e NETFILTER_XT_TARGET_LOG -e NETFILTER_XT_MATCH_RECENT
+  REQUIRED+=(SYSVIPC POSIX_MQUEUE IPC_NS PID_NS USER_NS DEVTMPFS
+             NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT IP_NF_TARGET_REJECT)
+fi
 if [ "$O3" = true ]; then
   cfg -d CC_OPTIMIZE_FOR_PERFORMANCE -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
+fi
+PGO_OK=false
+if [ "$PGO" = true ]; then
+  # 一加在 common 里放了一份真机采集的 PGO 数据（IR 插桩，覆盖 5 万多个函数，热点是时钟、zram、binder、调频等），
+  # 并改了编译规则：开 ARCH_SUPPORTS_PGO_CLANG 后，KCFLAGS_PGO 会加到每个文件（个别目录用 PGO_PROFILE := n 排除），
+  # 跨模块内联上限也从 5 放宽到 60。我们打过补丁的函数会和数据对不上，内核又开着 WERROR，所以关掉这几类警告。
+  PGO_FILE="$KDIR/pgo-profiles/vmlinux_v1.profdata"
+  if [ "$LTO" = full ]; then
+    echo "警告：full LTO + PGO 实测链接时超过 14 GB 内存（15 GB 机器被杀），16 GB 的 GitHub 机器同样跑不下，建议用 thin"
+  fi
+  if [ -f "$PGO_FILE" ]; then
+    cfg -e ARCH_SUPPORTS_PGO_CLANG
+    REQUIRED+=(ARCH_SUPPORTS_PGO_CLANG)
+    MAKE_ARGS+=("KCFLAGS_PGO=-fprofile-use=$PGO_FILE -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled -Wno-backend-plugin")
+    PGO_OK=true
+  else
+    echo "源码里没有 pgo-profiles/vmlinux_v1.profdata，跳过 PGO"
+  fi
 fi
 make "${MAKE_ARGS[@]}" olddefconfig
 
@@ -335,13 +420,22 @@ make "${MAKE_ARGS[@]}" -j"$JOBS" Image
 KERNEL_RELEASE="$(cat "$KOUT/include/config/kernel.release")"
 echo "编译完成，用时 $(( ($(date +%s) - START) / 60 )) 分钟，内核版本 $KERNEL_RELEASE"
 
+ABI_RESULT="未检查（ABI_CHECK=false）"
+if [ "$ABI_CHECK" = true ]; then
+  log "KMI 检查：对比官方基线的符号 CRC"
+  python3 "$SCRIPT_DIR/abi_check.py" "$KDIR" "$BASE_SYMVERS" "$KOUT/vmlinux.symvers" ||
+    die "KMI 被破坏，刷进去厂商模块（WiFi、相机等）会加载失败，已停止出包。请关掉最近打开的功能再试"
+  ABI_RESULT="通过（KMI 符号 CRC 与官方配置一致）"
+fi
+
 # ------------------------------------------------------------------ 8. 打包
 log "打包"
 rm -f "$OUT_DIR"/Image "$OUT_DIR"/*-AnyKernel3.zip "$OUT_DIR"/*-boot.img "$OUT_DIR"/build-info.txt
 cp "$KOUT/arch/arm64/boot/Image" "$OUT_DIR/Image"
 TAG="${KERNEL_NAME}-A${ANDROID_VER}-${KERNEL_VERSION}"
-[ "$KSU" = true ] && TAG="$TAG-KSU"
+if [ "$KSU" = true ]; then TAG="$TAG-KSU"; else TAG="$TAG-Generic"; fi
 [ "$SUSFS" = true ] && TAG="$TAG-SUSFS"
+[ "$CONTAINERS_OK" = true ] && TAG="$TAG-Container"
 
 AK3="$WORK_DIR/AnyKernel3"
 rm -rf "$AK3"
@@ -383,13 +477,16 @@ cat > "$OUT_DIR/build-info.txt" <<EOF
 内核版本     : $KERNEL_RELEASE
 编译器       : $(clang --version | head -n1)
 LTO / O3     : $LTO / $O3
-KernelSU     : $([ "$KSU" = true ] && echo "$KSU_REF @ $(git -C "$KP/KernelSU" describe --tags --always)" || echo 未集成)
+PGO          : $([ "$PGO_OK" = true ] && echo "已启用（一加真机数据 pgo-profiles/vmlinux_v1.profdata）" || echo 未启用)
+KernelSU     : $([ "$KSU" = true ] && echo "$KSU_REF @ $(git -C "$KP/KernelSU" describe --tags --always)" || echo "未内置（通用内核，可用 APatch App 自行修补 boot.img，或配合 Magisk）")
 SUSFS        : $([ "$SUSFS" = true ] && echo "$SUSFS_VERSION ($SUSFS_REF)" || echo 未集成)
 BBR          : v1=$BBR v3=$BBR3_OK（默认算法: $BBR_DEFAULT）
 网络扩展     : TTL/ipset=$NET_EXTRAS  队列调度=$QDISC
 调优补丁     : $([ "$OPT" = true ] && echo "已应用 $OPT_APPLIED 个 (kernel_patches @ ${PATCHES_REF:0:12})" || echo 未应用)
 NTSync       : $NTSYNC_OK
 tmpfs xattr  : $TMPFS_XATTR
+容器支持     : $CONTAINERS_OK$([ "$CONTAINERS_OK" = true ] && [ "$SUSFS" = true ] && echo "（带 SUSFS：需在 SuSFS4KSU 设置里关闭 HIDE SUS MOUNTS FOR ALL PROCESSES）")
+KMI 检查     : $ABI_RESULT
 EOF
 cat "$OUT_DIR/build-info.txt"
 log "全部完成，产物在 $OUT_DIR"

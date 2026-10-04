@@ -3,7 +3,7 @@
 [简体中文](README.md) | **English**
 
 A GKI kernel build for the OnePlus Pad Pro (Snapdragon 8 Gen 3 / SM8650).
-It builds from OnePlus's official open-source code, integrates KernelSU, SUSFS, BBR / BBRv3 and a set of community tuning patches,
+It builds from OnePlus's official open-source code, integrates KernelSU, SUSFS, BBR / BBRv3 and a set of community tuning patches (or builds a generic kernel without root for APatch / Magisk), with optional container support (LXC / Docker),
 and outputs an AnyKernel3 flashable zip, plus an optional `boot.img` you can flash directly with fastboot.
 
 - Full guide, flashing and recovery: [`oneplus-pad-pro-kernel/README.en.md`](oneplus-pad-pro-kernel/README.en.md)

@@ -45,6 +45,6 @@ on an ordinary computer without a GPU. Documents are turned into training data (
 paraphrased rewrites, generated Q&A) and learned with LoRA. See [llm/README.md](llm/README.md) (Chinese).
 
 ```bash
-pip install -r llm/requirements.txt
+bash llm/setup.sh && source .venv/bin/activate
 python llm/main.py check && python llm/main.py download && python llm/main.py auto && python llm/main.py chat
 ```

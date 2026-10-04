@@ -23,10 +23,25 @@
 
 **不需要准备任何资料**：项目自带一个知识库（`llm/kb/docs/`，13 篇 AI/大模型基础知识，约 1.6 万字），下面的命令直接用它训练。
 
-需要 Python 3.9 及以上版本。在项目根目录执行：
+需要 Python 3.9 及以上版本。依赖装在项目自己的虚拟环境 `.venv` 里，不影响系统的 Python。
+
+**第一次：安装**（在项目根目录执行）
 
 ```bash
-pip install -r llm/requirements.txt        # 国内可加：-i https://pypi.tuna.tsinghua.edu.cn/simple
+bash llm/setup.sh                          # Linux / macOS：自动创建 .venv 并安装依赖（默认用清华镜像）
+```
+
+Windows 没有 bash，手动执行：
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r llm\requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+**每次使用前**先激活虚拟环境：Linux / macOS 运行 `source .venv/bin/activate`，Windows 运行 `.venv\Scripts\activate`。然后：
+
+```bash
 python llm/main.py check                   # 检测配置、测算力、推荐模型大小、估算训练时间
 python llm/main.py download                # 下载底座模型；连不上 huggingface.co 时自动用 hf-mirror.com
 python llm/main.py auto                    # 一键：切分 → 改写 → 出题 → 训练集 → 训练
@@ -36,7 +51,9 @@ python llm/main.py web                     # 网页问答，浏览器打开 http
 
 每一步都能断点续跑：中途关机后重新运行同一条命令，已完成的部分会跳过（训练加 `--resume`）。
 
-**有 NVIDIA 显卡？**先按 [PyTorch 官网](https://pytorch.org/get-started/locally/) 安装 CUDA 版 PyTorch，程序会自动用显卡，训练快 10 倍以上。
+**有 NVIDIA 显卡？**`setup.sh` 检测到显卡会自动安装带 CUDA 的 PyTorch，程序会自动用显卡，训练快 10 倍以上。Windows 请按 [PyTorch 官网](https://pytorch.org/get-started/locally/) 的命令安装 CUDA 版。
+
+**安装时报 `externally-managed-environment`？**说明直接用了系统的 pip。请按上面的方法用 `bash llm/setup.sh` 安装，或先激活 `.venv` 再 pip install。
 
 **想让生成训练数据更快？**`pip install llama-cpp-python`，然后运行 `python llm/main.py download --gguf`。改写和出题会自动改用 4bit 量化模型，速度快 2～4 倍。
 

@@ -1,54 +1,19 @@
-# 一加平板 Pro 玩机内核
+# 低成本知识库训练模型
 
-**简体中文** | [English](README.en.md)
+把知识库教给一个开源小模型（Qwen2.5 0.5B / 1.5B），训练完成后模型不查任何资料，直接回答知识库里的问题。
+普通电脑就能训练，不需要显卡，不调用任何收费接口。项目自带一个知识库（13 篇 AI/大模型基础知识），不需要准备任何资料。
 
-一加平板 Pro（OnePlus Pad Pro，骁龙 8 Gen 3 / SM8650）的 GKI 内核编译方案：
-基于一加官方开源源码，集成 KernelSU、SUSFS、BBR / BBRv3 和一组社区调优补丁；也可以编成不带 root 的通用内核（配合 APatch / Magisk），可选容器支持（LXC / Docker），
-输出 AnyKernel3 卡刷包，可选输出能直接 fastboot 刷入的 `boot.img`。
+```bash
+bash llm/setup.sh                 # 第一次：创建虚拟环境 .venv 并安装依赖
+source .venv/bin/activate         # 每次使用前：激活虚拟环境
+python llm/main.py check          # 检测配置，推荐模型大小，估算训练时间
+python llm/main.py download       # 下载底座模型（国内自动走镜像）
+python llm/main.py auto           # 一键生成训练数据并训练
+python llm/main.py chat           # 用训练好的模型问答
+```
 
-- 完整方案、刷入和救砖说明：[`oneplus-pad-pro-kernel/README.md`](oneplus-pad-pro-kernel/README.md)
-- 本地编译：`oneplus-pad-pro-kernel/build.sh`
-- 云编译：Actions → 「一加平板 Pro 玩机内核」→ Run workflow
+原理、分步运行、评测、配置要求和常见问题见 [llm/README.md](llm/README.md)。
 
 ## 许可证
 
-```bash
-npm install
-```
-
-## Run
-
-```bash
-npm start
-```
-
-## Usage
-
-### Crawl a page
-
-```bash
-curl -X POST http://localhost:3000/crawl -H "Content-Type: application/json" -d '{"url":"https://example.com"}'
-```
-
-### Search
-
-Open in browser:
-
-http://localhost:3000/search?q=example
-
-## Notes
-
-This is a toy search engine. No ranking, no persistence, no distributed crawling.
-
-## Knowledge-base trained model (`llm/`)
-
-Train a small open-source LLM (Qwen2.5 0.5B/1.5B) on your own knowledge base so it answers from memory,
-on an ordinary computer without a GPU. Documents are turned into training data (original passages,
-paraphrased rewrites, generated Q&A) and learned with LoRA. See [llm/README.md](llm/README.md) (Chinese).
-
-```bash
-bash llm/setup.sh && source .venv/bin/activate
-python llm/main.py check && python llm/main.py download && python llm/main.py auto && python llm/main.py chat
-```
-本仓库的脚本和文档采用 [AGPL-3.0](LICENSE)。
-内核源码、KernelSU、SUSFS 及各补丁沿用各自原有的许可证（主要是 GPL-2.0）。
+[AGPL-3.0](LICENSE)
